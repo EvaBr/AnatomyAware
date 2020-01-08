@@ -9,11 +9,53 @@ of distance maps, with mid-stage and late fusion of coordinates.
 @author: eva
 """
 import numpy as np
-from keras.layers import Input
-from keras.models import Model
-from keras.layers import Dense, Dropout, Activation, Flatten, BatchNormalization
-from keras.layers import Conv3D, UpSampling3D, Concatenate, Reshape
-import tensorflow as tf
+import torch
+from torch import nn
+import torch.nn.functional as F
+
+class OnePathway(nn.Module):
+  def __init__(self, in_channels, num_classes, dropoutrateCon=0.2, dropoutrateFC=0.5):
+    super(OnePathway, self).__init__()
+    self.conv1 = nn.Conv3d(in_channels, 30, 3, padding=0)
+    self.conv2 = nn.Conv3d(30, 30, 3)
+    self.conv3 = nn.Conv3d(30, 40, 3, padding=0)
+    self.conv4 = nn.Conv3d(40, 40, 3)
+    self.conv5 = nn.Conv3d(40, 40, 3, padding=0)
+    self.conv6 = nn.Conv3d(40, 40, 3)
+    self.conv7 = nn.Conv3d(40, 50, 3, padding=0)
+    self.conv8 = nn.Conv3d(50, 50, 3)
+    self.fcconv1 = nn.Conv3d(50, 150, 1)
+    self.fcconv2 = nn.Conv3d(150, 150, 1)
+    self.finalclass = nn.Conv3d(150, num_classes, 1)
+
+  def forward(self, input):
+    x = self.conv1(input)
+    x = self.conv2(x)
+    x = self.conv3(x)
+    
+    # now we can reshape `c` and `f` to 2D and concat them
+    combined = torch.cat((c.view(c.size(0), -1),
+                          f.view(f.size(0), -1)), dim=1)
+    out = self.fc2(combined)
+    return out
+
+#two inputs
+class TwoInputsDM(nn.Module):
+  def __init__(self):
+    super(TwoInputsDM, self).__init__()
+    self.conv = nn.Conv2d( ... )  # set up your layer here
+    self.fc1 = nn.Linear( ... )  # set up first FC layer
+    self.fc2 = nn.Linear( ... )  # set up the other FC layer
+
+  def forward(self, input1, input2):
+    c = self.conv(input1)
+    f = self.fc1(input2)
+    # now we can reshape `c` and `f` to 2D and concat them
+    combined = torch.cat((c.view(c.size(0), -1),
+                          f.view(f.size(0), -1)), dim=1)
+    out = self.fc2(combined)
+    return out
+
 
 #original deepmed
 def orig_deepmed(num_classes):
