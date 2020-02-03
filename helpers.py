@@ -12,6 +12,9 @@ import nibabel as nib
 import pickle
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider, Button, RadioButtons
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
 #################################### READING DATA #############################
 def get_POEM_files(pot='/media/eva/Elements/backup-june2019'):
@@ -89,13 +92,74 @@ def createDatasets(filename='AnatomyAware/datasetTRAIN.pickle', folder='AnatomyA
         #print('sezn: ', sezn, ' od prej: ', subj[5])
 
 
+##############################  PROCESSING SEGMENTED DATA #####################
+def glue_patches(patchi, placeringar): #glues, also performs nn.Softmax...
+    l = int(np.sqrt(len(patchi)))
+    s = patchi[0].shape # 6 x 256 x _ x 256
+    print(s)
+    segmented = np.empty(shape=(l*s[1], s[2], l*s[3]))
+    for patch, place in zip(patchi, placeringar):
+        patch = nn.Softmax(dim=0)(patch) #mogoce se zmeraj dim=1? odvisno, ce pustis dummy batch dimension
+        x,y = place
+        print(segmented[x*s[0]:(x+1)*s[0], :, y*s[2]:(y+1)*s[2]].shape, patch.data.numpy().shape)
+        segmented[x*s[0]:(x+1)*s[0], :, y*s[2]:(y+1)*s[2]] = patch.data.numpy()
+
+    return segmented
+
 
 ##################################### LOSSES & METRICS ########################
 #weighted categ. crossentropy
     
 
 #Dice loss
-    
+def dice_coeff(pred, target, nb_classes, weights):
+    smooth = 0.0001
+    #print(target.shape) #(12, 9,9,9)
+    target = F.one_hot(target.long(), num_classes=nb_classes).permute(0, 4, 1, 2, 3).contiguous()
+    #print(target.shape) #(12, 6, 9,9,9)
+    weights = torch.from_numpy(weights)
+
+    #now target is also of size BxCxHxWxL, with entries 1/0
+#    num = pred.size(0)
+#    m1 = pred.contiguous().view(num, -1)  # Flatten
+#    m2 = target.contiguous().view(num, -1)  #torch.from_numpy( Flatten
+#    intersection = torch.sum(m1 * m2.float())
+#
+#    return (2. * intersection + smooth) / (torch.sum(m1) + torch.sum(m2.float()) + smooth)
+#    #We return shape Bx1: cause when you test, B=nr subj, so you don't want average Dice there....
+
+    weights = weights.float().view(1, nb_classes, 1, 1, 1) #add dummy dimensions to broadcast when multiplying
+    dims = tuple(range(1, target.ndimension())) #leave out batch-dim
+    intersection = torch.sum(pred * target * weights, dims) #weighted sum over all classes
+    cardinality = torch.sum((pred + target) * weights, dims) #weighted sum over all classes
+    #print(dims)
+    return (2. * intersection) / (cardinality + smooth)
+
+def dice_coeff_per_class(pred, target, nb_classes):
+    smooth = 0.0001
+    # print(target.shape) #(12, 9,9,9)
+    target = F.one_hot(target.long(), num_classes=nb_classes).permute(0, 4, 1, 2, 3).contiguous()
+    dims = tuple(range(2, target.ndimension())) #leave out batch-dim and class-dim
+    intersection = torch.sum(pred * target, dims) #weighted sum over all classes
+    cardinality = torch.sum(pred + target, dims) #weighted sum over all classes
+    #print(dims)
+    return (2. * intersection) / (cardinality + smooth)
+
+
+class SoftDiceLoss(nn.Module):
+    def __init__(self, nb_classes=6, weight=np.array([1,1,1,1,1,1]), size_average=True):
+        super(SoftDiceLoss, self).__init__()
+        self.softmax = nn.Softmax(dim=1)
+        self.weights = weight
+        self.classes = nb_classes
+
+    def forward(self, logits, targets):
+        probs = self.softmax(logits)
+        num = targets.size(0)  # Number of batches
+
+        score = dice_coeff(probs, targets, self.classes, self.weights)
+        score = 1 - score.sum() / num  # .sum je za sumacijo preko batchev...
+        return score
 
 
 #more?
