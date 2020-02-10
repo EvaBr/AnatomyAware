@@ -12,7 +12,7 @@ import pickle
 import numpy as np
 import re
 #from torchvision.transforms import ToTensor
-class POEMDatasetTEST(data.Dataset):
+class POEMDatasetTEST(data.Dataset): #TODO FIX
     def __init__(self, list_IDs,  patchsize=50, overlap=16): #([fat, wat, dX, dY, label, label_sizes])
         '_subbatch_: how many patches, sampled according to _sampling_ strategy will be extracted per subject/image'
         self.list_IDs = list_IDs
@@ -49,7 +49,7 @@ class POEMDatasetTEST(data.Dataset):
         return torch.from_numpy(subj), torch.from_numpy(name), torch.from_numpy(where_it_belongs) #torch.from_numpy(label[1:-1, 1:-1, 1:-1]), torch.from_numpy(name)
 
 
-def test_collate(batch):
+def test_collate(batch): #TODO FIX
     slike = torch.cat([item[0] for item in batch], dim=0)
     names = torch.cat([item[1] for item in batch], dim=0)
     placing = torch.cat([item[2] for item in batch], dim=0)
@@ -57,7 +57,7 @@ def test_collate(batch):
 
 
 
-class POEMDataset(data.Dataset):
+class POEMDataset(data.Dataset): #TODO : dodaj moznost channeljev - ie da nena loadas dist.mapov
     def __init__(self, list_IDs, list_labels, segment_size, out_size, sampling): #([fat, wat, dX, dY, label, label_sizes])
         '_subbatch_: how many patches, sampled according to _sampling_ strategy will be extracted per subject/image'
         self.list_IDs = list_IDs

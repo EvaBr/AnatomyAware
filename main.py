@@ -14,10 +14,12 @@ import torch
 from torch.utils import data
 from torch import nn
 import torch.optim as optim
+import pandas as pd
 
 BATCH_SIZE = 5
-
 #create dataset
+outpath = '/home/eva/Desktop/research/PROJEKT2-DeepLearning/AnatomyAwareDL/Results/'
+
 subjekti = glob.glob('/home/eva/Desktop/research/PROJEKT2-DeepLearning/AnatomyAwareDL/Data/TRAINdata/sub*'); subjekti.sort()
 labele = glob.glob('/home/eva/Desktop/research/PROJEKT2-DeepLearning/AnatomyAwareDL/Data/TRAINdata/lab*'); labele.sort()
 dataset = POEMDataset(subjekti[0:2], labele[0:2], 25, 9, [1,2,2,1,4,2])
@@ -67,12 +69,11 @@ for epoch in range(epochs):
         epoch_dice += dice_organs.sum(0).squeeze()
         running_loss += loss.item()
         if batch_idx%log_interval==0:
-#            print('[{}/{} ({:.0f}%)]\tAccumulated batch loss: {:.6f}\tBatch generalized Dice: {:.6f}'.format(batch_idx * len(notr),
-#                    vsehslik, 100.*batch_idx/len(train_loader), running_loss/(batch_idx+1), dice.sum()/len(notr)))
             print('[{:.0f}%]\tAccumulated batch loss: {:.6f}\tBatch generalized Dice: {:.6f}'.format(100.*batch_idx/len(train_loader),
                                                 running_loss/(batch_idx+1), dice.sum()/len(notr)))
-            print('dices by organ: ', dice_organs.mean(0).data.numpy())
-    if (epoch+1)%val_interval==0:
+            print('dices batch averages by organ: ', dice_organs.mean(0).data.numpy())
+
+    if (epoch+1)%val_interval==0: #TODO add validation
         #with torch.no_grad():
             #for x_val, y_val in val_loader:
              #   x_val = x_val.to(device)
@@ -88,55 +89,65 @@ for epoch in range(epochs):
     epoch_dice = epoch_dice.squeeze()/vsehslik
     print('Epoch {} finished. Averaged loss: {:.6f}, average Dices: {} \n'.format(epoch, epoch_loss, epoch_dice.data.numpy()))
     train_losses.append(epoch_loss)
-    training_Dice.append(epoch_dice)
+    training_Dice.append(epoch_dice.data.numpy())
 
+print("Training finished. Saving metrics...")
+dejta = np.column_stack([np.array(train_losses), np.array(training_Dice])
+df = pd.DataFrame(data=dejta,    # values
+            columns=np.array(['Loss', 'Dice Bckg','Dice Liver', 'Dice 2', 'Dice 3', 'Dice 4', 'Dice 5']))
+df.to_csv(outpath+'DiceAndLoss.csv')
 
 #EVALUATION ON IMAGE:
-#-cut it in patches
-#-evaluate on patches
+#-cut it in patches <- do this in advance!!
+#-inference on patches
 #-sew patches back together
-#So far, Dices were calc. on patches, so they don't say much...
-
+#So far, Dices were calc. on patches, so they don't say much... Calc again on sewn pics!
 test_subjekti = subjekti[0:2]
 test_labele = labele[0:2]
+patchsize = 50
 overlap = 8
-test_dataset = POEMDatasetTEST(test_subjekti, patchsize=50, overlap=overlap*2)
-test_loader = data.DataLoader(test_dataset, batch_size=1, shuffle=False, collate_fn=test_collate)
-#TODO:  does DICE and loss etc work on this? now you have no batch channel really...
+test_list = cut_patches(test_subjekti, patchsize, overlap*2, channels=2, outpath=outpath, input2=False)
+
+test_dataset = POEMDatasetTEST(test_list) #TODO fix/new dataloader za cuttane slike, z on/off switchem za multiinput
+test_loader = data.DataLoader(test_dataset, batch_size=32, shuffle=False, collate_fn=test_collate)
+#TODO!! test loader should return (batch of patches, names), where names will be names of segmented output patches!!!
 
 test_losses = []
 test_dices = []
-outpath = '/home/eva/Desktop/research/PROJEKT2-DeepLearning/AnatomyAwareDL/Out/out'
-
 net.eval()
+for slike, names in test_loader:
+    slike = torch.as_tensor(slike, device=device)  #this even needed? only to_device?
 
-nr = 1
-patchi = []
-placeringar = []
-for slika, name, placing in test_loader:
-    slika = torch.as_tensor(slika, device=device)  #this even needed? only to_device?
+    segm = net(slike)
+   # segm = nn.Softmax(dim=1)(segm)
+   # segm = torch.argmax(segm, dim=1)
+    #save all processed patches temporarily; without doing softmax, since you need one-hot for dice etc later
+    for patch, name in enumerate(names):
+        np.save(name, np.squeeze(segm[patch,...].numpy()))
 
-    if name>nr: #this means we're done with one whole subject.
-        #we need to glue all the patches appropriately:
-        segmentacija = glue_patches(patchi, placeringar) #glues, also performs nn.Softmax...
-        tarca = pickle.load(open(test_labele[nr-1], 'rb'))
-        tarca = torch.from_numpy(tarca[overlap:-overlap, overlap:-overlap, overlap:-overlap])
-        #tole vrstico visje ne bo delalo, ce ne bo 256-16 deljivo s patchsize!
 
-        test_loss = napaka(segmentacija, tarca.long())
-        test_losses.append(test_loss.item())
-        dajs = dice_coeff_per_class(segmentacija, tarca, nb_classes=6)
-        test_dices.append(dajs)
-        # save also the predictions, to compare visually:
-        with open(outpath + name + '.pickle', 'wb') as handle:
-            pickle.dump(segmentacija, handle, protocol=pickle.HIGHEST_PROTOCOL)
-        #reset for counting and new subject:
-        print('Subject nr ' + name + ': \nLoss {:.4f}, \t Dices {}'.format(test_loss.item(), dajs))
-        nr = name.data
-        patchi = []
-        placeringar = []
+#after inference is done on entire dataset, glue temporarily saved ndarrays, evaluate Dice++, save pngs.
+#we need to glue all the patches appropriately:
+vsitestirani = []
+for subj in test_labele:
+    nr = re.findall(r'.*label([0-9]*)\.pickle', subj)
+    vsitestirani.append(nr[0])
+    segmentacija = torch.from_numpy(glue_patches(nr[0], outpath, patchsize, overlap)) #glues one person, saves png, returns numpy one one-hot.
+    #tarca = np.load(test_labele[subj]))
+    tarca = pickle.load(open(subj, 'rb'))
+    tarca = torch.from_numpy(tarca[overlap:-overlap, overlap:-overlap, overlap:-overlap])
 
-    segm = net(slika) #morda bo tle treba dummy dimension dodat, da bo slo tole,
-    patchi.append(segm) #pol pa predn rezultat appendas, se squeeznes. da bo delalo z lepljenjem.
-    placeringar.append(placing)
+    test_loss = napaka(segmentacija, tarca.long())  #napaka needs onehot, does softmax inside.
+    test_losses.append(test_loss.item())
+    dajs = dice_coeff_per_class(nn.Softmax(dim=1)(segmentacija), tarca, nb_classes=6) #Dice expects softmax!
+    test_dices.append(dajs.data.numpy())
 
+    #reset for counting and new subject:
+    print('Subject nr ' + subj + ': \nLoss {:.4f}, \t Dices {}'.format(test_loss.item(), dajs.data.numpy()))
+
+print("Testing finished. Saving metrics...")
+dejta = np.column_stack([np.array(test_losses), np.array(test_dices])
+df = pd.DataFrame(data=dejta,    # values
+                  index=vsitestirani,
+                columns=np.array(['Loss', 'Dice Bckg','Dice Liver', 'Dice 2', 'Dice 3', 'Dice 4', 'Dice 5']))
+df.to_csv(outpath+'DiceAndLoss_Test.csv')

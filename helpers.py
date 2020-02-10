@@ -10,6 +10,8 @@ import glob
 import numpy as np
 import nibabel as nib
 import pickle
+import scipy.misc
+import re
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider, Button, RadioButtons
 import torch
@@ -93,19 +95,48 @@ def createDatasets(filename='AnatomyAware/datasetTRAIN.pickle', folder='AnatomyA
 
 
 ##############################  PROCESSING SEGMENTED DATA #####################
-def glue_patches(patchi, placeringar): #glues, also performs nn.Softmax...
-    l = int(np.sqrt(len(patchi)))
-    s = patchi[0].shape # 6 x 256 x _ x 256
-    print(s)
-    segmented = np.empty(shape=(l*s[1], s[2], l*s[3]))
-    for patch, place in zip(patchi, placeringar):
-        patch = nn.Softmax(dim=0)(patch) #mogoce se zmeraj dim=1? odvisno, ce pustis dummy batch dimension
-        x,y = place
-        print(segmented[x*s[0]:(x+1)*s[0], :, y*s[2]:(y+1)*s[2]].shape, patch.data.numpy().shape)
-        segmented[x*s[0]:(x+1)*s[0], :, y*s[2]:(y+1)*s[2]] = patch.data.numpy()
+def cut_patches(subj_list, patchsize, overlap, channels=4, outpath="", input2=False):
+    #cut each img in subj_list into patches of size patchsize with given overlap.
+    #if input2, cut also larger patches (size should be patchsize+26 for deepmed)
+    # and downsample them, for second input.
+    #outpath is where the cut imges will be saved, channels =1-4 is how many channels we use. First two are
+    # fat and wat img, second two are x- and y-dist map.
+    step = patchsize-overlap
+    out_list = []
+    for sub in subj_list:
+        subj = pickle.load(open(sub, 'rb'))
+        nr = re.findall(r'.*subj([0-9]*)\.pickle', sub)
 
-    return segmented
+        # now cut it to appropriate pieces
+        s = subj[0].shape  # (256, x, 256)
+        subj = np.stack([subj[i] for i in range(channels)])
+        for i in range(s[0]//step+1): #cut so many pieces from left, and then one from right end, in case x,y,z not divisible with step.
+            i_tmp = np.minimum(patchsize + (i + 1) * step, s[0])
+            for j in range(s[1]//step+1):
+                j_tmp = np.minimum(patchsize + (j + 1) * step, s[1])
+                for k in range(s[2]//step+1):
+                    k_tmp = np.minimum(patchsize + (k + 1) * step, s[2])
+                    patch = subj[:, i_tmp-patchsize:i_tmp, j_tmp-patchsize:j_tmp, k_tmp-patchsize:k_tmp]
+                    nm = f"{outpath}/subj_{nr[0]}_{channels}_{i_tmp}_{j_tmp}_{k_tmp}.npy"
+                    np.save(nm, patch)
+                    out_list.append(nm)
+    return out_list
 
+def glue_patches(nr, path, patchsize, overlap): #glues, also performs nn.Softmax and saves png, returns numpy one one-hot
+    patches = glob.glob(path+'subj_'+nr+'_*')
+    patches.sort()
+    sajz = np.array(re.findall(r".*[0-9]*.*_([0-9]*)_([0-9]*)_([0-9]*)_([0-9]*)", patches[-1])[0], np.int16)
+    out_img = np.zeros(sajz)
+    step = patchsize-2*overlap
+    for pch in patches:
+        s = np.array(re.findall(r".*[0-9]*.*_([0-9]*)_([0-9]*)_([0-9]*)", pch)[0], np.int16)
+        out_img[:, s[0]-step:s[0], s[1]-step:s[1], s[2]-step:s[2]] = np.load(pch)
+    one_hot_whole_subj = out_img[:, overlap*2:, overlap*2:, overlap*2:]
+    #save a png:
+    to_save = np.argmax(one_hot_whole_subj, axis=0)
+    scipy.misc.imsave(f'{path}out{nr}.jpg', to_save)
+
+    return one_hot_whole_subj
 
 ##################################### LOSSES & METRICS ########################
 #weighted categ. crossentropy
@@ -140,8 +171,8 @@ def dice_coeff_per_class(pred, target, nb_classes):
     # print(target.shape) #(12, 9,9,9)
     target = F.one_hot(target.long(), num_classes=nb_classes).permute(0, 4, 1, 2, 3).contiguous()
     dims = tuple(range(2, target.ndimension())) #leave out batch-dim and class-dim
-    intersection = torch.sum(pred * target, dims) #weighted sum over all classes
-    cardinality = torch.sum(pred + target, dims) #weighted sum over all classes
+    intersection = torch.sum(pred * target, dims)
+    cardinality = torch.sum(pred + target, dims)
     #print(dims)
     return (2. * intersection) / (cardinality + smooth)
 
