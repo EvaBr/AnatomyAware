@@ -7,16 +7,25 @@ Created on Mon Aug 19 11:39:54 2019
 """
 
 import glob
+import natsort
 import numpy as np
 import nibabel as nib
 import pickle
-import scipy.misc
+#import scipy.misc
+import imageio
 import re
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider, Button, RadioButtons
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from tqdm import tqdm
+from functools import partial
+
+
+tqdm_ = partial(tqdm, ncols=100,
+                leave=False,
+                bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [' '{rate_fmt}{postfix}]')
 
 #################################### READING DATA #############################
 def get_POEM_files(pot='/media/eva/Elements/backup-june2019'):
@@ -95,13 +104,19 @@ def createDatasets(filename='AnatomyAware/datasetTRAIN.pickle', folder='AnatomyA
 
 
 ##############################  PROCESSING SEGMENTED DATA #####################
-def cut_patches(subj_list, patchsize, overlap, channels=4, outpath="", input2=False):
-    #cut each img in subj_list into patches of size patchsize with given overlap.
-    #if input2, cut also larger patches (size should be patchsize+26 for deepmed)
+def cut_patches(subj_list, patchsize, overlap, channels=4, outpath="", subsampledinput=False):
+    #cut each img in subj_list into patches of size patchsize with given overlap (16).
+    #if subsampledinput, cut also larger patches (size should be 3*(patchsize-6) for deepmed)
     # and downsample them, for second input.
     #outpath is where the cut imges will be saved, channels =1-4 is how many channels we use. First two are
     # fat and wat img, second two are x- and y-dist map.
+
+    #OBS patchsize needs to be 1 modulo 3 !!!
+    if patchsize%3!=1:
+        raise ValueError('Patch size not equal to 1 modulo 3! Try again.')
     step = patchsize-overlap
+    bigpatch = patchsize + 2*overlap - 2
+    pad = (bigpatch-patchsize)//2 #==15
     out_list = []
     for sub in subj_list:
         subj = pickle.load(open(sub, 'rb'))
@@ -117,26 +132,38 @@ def cut_patches(subj_list, patchsize, overlap, channels=4, outpath="", input2=Fa
                 for k in range(s[2]//step+1):
                     k_tmp = np.minimum(patchsize + (k + 1) * step, s[2])
                     patch = subj[:, i_tmp-patchsize:i_tmp, j_tmp-patchsize:j_tmp, k_tmp-patchsize:k_tmp]
+                 #   print("cut out a patch of size ", patch.shape)
                     nm = f"{outpath}/subj_{nr[0]}_{channels}_{i_tmp}_{j_tmp}_{k_tmp}.npy"
                     np.save(nm, patch)
                     out_list.append(nm)
+        if subsampledinput:
+            subj = np.pad(subj, ((0,0), (pad,pad), (pad,pad), (pad,pad)))
+            for i in range(s[0] // step + 1):  # cut so many pieces from left, and then one from right end, in case x,y,z not divisible with step.
+                i_tmp = np.minimum(patchsize + (i + 1) * step, s[0])
+                for j in range(s[1] // step + 1):
+                    j_tmp = np.minimum(patchsize + (j + 1) * step, s[1])
+                    for k in range(s[2] // step + 1):
+                        k_tmp = np.minimum(patchsize + (k + 1) * step, s[2])
+                        patch = subj[:, i_tmp-patchsize:i_tmp + 2*pad:3, j_tmp-patchsize:j_tmp + 2*pad:3, k_tmp-patchsize:k_tmp + 2*pad:3]
+                        nm = f"{outpath}/subj_{nr[0]}_{channels}_{i_tmp}_{j_tmp}_{k_tmp}_subsmpl.npy"
+                        np.save(nm, patch)
     return out_list
 
-def glue_patches(nr, path, patchsize, overlap): #glues, also performs nn.Softmax and saves png, returns numpy one one-hot
-    patches = glob.glob(path+'subj_'+nr+'_*')
-    patches.sort()
-    sajz = np.array(re.findall(r".*[0-9]*.*_([0-9]*)_([0-9]*)_([0-9]*)_([0-9]*)", patches[-1])[0], np.int16)
+def glue_patches(nr, path, patchsize, overlap, nb_classes=6): #glues, also performs nn.Softmax and saves png, returns numpy one one-hot
+    patches = glob.glob(path+'subj_'+nr+'_*_OUT*')
+    patches = natsort.natsorted(patches)
+    sajz = np.array([nb_classes]+list(re.findall(r".*_([0-9]+)_([0-9]+)_([0-9]+)", patches[-1])[0]), np.int16)
     out_img = np.zeros(sajz)
     step = patchsize-2*overlap
     for pch in patches:
-        s = np.array(re.findall(r".*[0-9]*.*_([0-9]*)_([0-9]*)_([0-9]*)", pch)[0], np.int16)
+        s = np.array(re.findall(r".*_([0-9]+)_([0-9]+)_([0-9]+)", pch)[0], np.int16)
         out_img[:, s[0]-step:s[0], s[1]-step:s[1], s[2]-step:s[2]] = np.load(pch)
     one_hot_whole_subj = out_img[:, overlap*2:, overlap*2:, overlap*2:]
     #save a png:
     to_save = np.argmax(one_hot_whole_subj, axis=0)
-    scipy.misc.imsave(f'{path}out{nr}.jpg', to_save)
-
-    return one_hot_whole_subj
+    #imageio.imwrite(f'{path}out{nr}.jpg', to_save)
+    np.save(f'{path}out{nr}.npy',to_save)
+    return one_hot_whole_subj[np.newaxis,...]
 
 ##################################### LOSSES & METRICS ########################
 #weighted categ. crossentropy
@@ -203,6 +230,7 @@ class SoftDiceLoss(nn.Module):
 ###################################### PLOTTING ###############################
 
 def compareimages(GT, out, fati):
+    'deprecated'
     offset=60
     maskedGT = np.ma.masked_where(GT == 0, GT)
     maskedOUT = np.ma.masked_where(out == 0, out)
@@ -232,5 +260,24 @@ def compareimages(GT, out, fati):
     slider.on_changed(update)
 
     plt.show()
+
+
+def VisualCompare(path_out, path_gt, path_ref, slice=44):
+    """loads target and the output segmentation and
+    visualizes them in the same size (ie cuts borders of target).
+    TODO Slider to move through z-direction for 3Dimages. """
+    out = np.load(path_out, allow_pickle=True)
+    gt = np.load(path_gt, allow_pickle=True)
+    ref = np.load(path_ref, allow_pickle=True)[0] #tking fat img as ref
+    out = np.pad(out, pad_width=8, mode='constant', constant_values=0) #hardcoded padding of output back to original size
+    #print("sizes: ", out.shape, gt.shape, ref.shape)
+    print("Nr of detected organ pixels: ", np.sum(out==1), np.sum(out==2), np.sum(out==3), np.sum(out==4), np.sum(out==5))
+    plt.figure(figsize=(15, 20))
+    #plt.subplot(1, 3, 1)
+    #plt.imshow(ref[:, slice, :].squeeze(), cmap="gray")
+    #plt.subplot(1, 3, 2)
+    #plt.imshow(gt[:, slice, :].squeeze(), vmin=0, vmax=5)
+    plt.subplot(1, 3, 3)
+    plt.imshow(out[:, slice, :].squeeze(), vmin=0, vmax=5)
 
 
