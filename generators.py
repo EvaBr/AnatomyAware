@@ -1,22 +1,26 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Mon Aug 19 12:16:21 2019
+Created on Mon May 15 10:00:52 2020
 
 @author: eva
 """
 
 import torch
 from torch.utils import data
-import pickle
 import numpy as np
 import re
 #from torchvision.transforms import ToTensor
 class POEMDatasetTEST(data.Dataset): #TODO
     def __init__(self, list_IDs,  channels, subsampled=False, channels_sub=None, input2=None, channels2=None): #([fat, wat, dX, dY, label, label_sizes])
-        """channels - list of which (of the 4) channels to give as normal (and possibily subsampled)
-        input. channels2 - which channels to give to second input, if input2 not None.
+        """Dataset, appropriate for apriori cut image loading. (Eg for VAL and TEST).
+        list_IDs - list of names of all patches datas to include in loading.
+        channels - list of which (of the 4 available) channels to give as normal (and possibily subsampled) input. 
+        subsampled - whether to produce also subsampled input.
+        channels_sub - list of channels to use in the subsampled input, if applicable.
+        channels2 - which channels to give to second input, if input2 not None.
         input2 - patchsize of second input. """
+
         self.list_IDs = list_IDs
         self.channels = channels
         self.subsample = subsampled
@@ -59,105 +63,24 @@ def test_collate(batch):
 
 
 
-class POEMDataset(data.Dataset): #TODO : dodaj moznost channeljev - ie da nena loadas dist.mapov
-    def __init__(self, list_IDs, list_labels, segment_size, out_size, sampling):  #([fat, wat, dX, dY, label, label_sizes])
-        self.list_IDs = list_IDs
-        self.labels = list_labels
-        self.sampling = sampling
-        self.subbatch = sum(sampling) #subbatch_: how many patches, sampled according to _sampling_ strategy will be extracted per subject/image
-        self.segment = int((segment_size-1)/2)
-        self.labseg = int((out_size-1)/2)
 
-    def __len__(self):
-        'total number of samples'
-        return len(self.list_IDs)
-
-    def __getitem__(self, item):
-        'get one sample: a subbatch of patches from 1 subject'
-        #select subject
-        subj = pickle.load(open(self.list_IDs[item], 'rb'))
-        label = pickle.load(open(self.labels[item], 'rb'))
-        #get patches according to sampling strategy.
-        #first let's correct sampling for the given subj:
-        localSampling = self.sampling
-        for org in range(6): #subj[10]:
-            razlika = self.sampling[org]-subj[10][org]
-            if 0<razlika:
-                localSampling[org] = subj[10][org]
-                localSampling[0] += razlika
-        #now get center points, careful with where you are allowed to sample:
-        s = label.shape
-        #print(subj[0].shape)
-        #print(s)
-        centres = []
-        for org in range(6):
-            organ = [c for c in subj[4+org] if (c[1]<s[1]-self.segment and c[1]>=self.segment and
-                                                c[0]<s[0]-self.segment and c[0]>=self.segment and
-                                                c[2]<s[2]-self.segment and c[2]>=self.segment)]
-            #rows = np.random.choice(subj[10][org], size=localSampling[org], replace=False)
-            #centres.append(subj[4 + org][rows])
-            np.random.shuffle(organ)
-            centres.append(organ[0:localSampling[org]])
-        #print("centers: ", centres)
-        centres = [ctr for ctr in centres if ctr]
-        centres = np.concatenate(centres, axis=0)
-        #now sample:
-        patches= []
-        truths = []
-        #Fat,Wat,Xdist,Ydist = subj[0], subj[1], subj[2], subj[3]
-        for center in centres:
-            i,j,k = center
-            patches.append(torch.from_numpy(np.stack([
-                subj[0][i-self.segment:i+self.segment+1, j-self.segment:j+self.segment+1, k-self.segment:k+self.segment+1],
-                subj[1][i-self.segment:i+self.segment+1, j-self.segment:j+self.segment+1, k-self.segment:k+self.segment+1],
-                subj[2][i-self.segment:i+self.segment+1, j-self.segment:j+self.segment+1, k-self.segment:k+self.segment+1],
-                subj[3][i-self.segment:i+self.segment+1, j-self.segment:j+self.segment+1, k-self.segment:k+self.segment+1],
-            ], axis=0))) #axis 0 bcs in pytorch channels first. so for each patch we append 4 x sgm x sgm x sgm array.
-            truths.append(torch.from_numpy(
-                label[i-self.labseg:i+self.labseg+1, j-self.labseg:j+self.labseg+1, k-self.labseg:k+self.labseg+1]))
-        #for p in patches: print(p.shape)
-
-        return torch.stack(patches), torch.stack(truths)
-
-
-def my_collate(batch):
-    data = torch.cat([item[0] for item in batch], dim=0)
-    target = torch.cat([item[1] for item in batch], dim=0)
-
-    return [data, target]
-
-#Ok, dataloader extremely slow, but at least seems to work. :)
-###################################################################
-#import glob
-#subjekti = glob.glob('/home/eva/Desktop/research/PROJEKT2-DeepLearning/AnatomyAware/TRAINdata/sub*'); subjekti.sort()
-#labele = glob.glob('/home/eva/Desktop/research/PROJEKT2-DeepLearning/AnatomyAware/TRAINdata/lab*'); labele.sort()
-#dataset = POEMDataset(subjekti, labele, 25, [1,1,1,1,1,1])
-#train_loader = data.DataLoader(dataset, batch_size=5, shuffle=True, collate_fn=my_collate)
-#
-#for i, batch in enumerate(train_loader):
-#    print(i, batch[0].shape) #or rather, plot sth?
-###################################################################
-
-
-
-
-#now dataset for two inputs
+#now dataset for training with multiple inputs. No predefined cutting of patches.
 class POEMDatasetMultiInput(data.Dataset):
     def __init__(self, list_IDs, list_labels, sampling, segment_size=25, channels=[0,1], subsample=True,
-                 channels_sub=[0,1,2,3], segment_size2=None, channels2=None): #([fat, wat, dX, dY, label, label_sizes])
-        """CAN BE USED as 1 pathway, or classic DM (normal+subsampled), or 2pathway, or 2pathway+subsampled.
+                 channels_sub=[0,1,2,3], segment_size2=None, channels2=None, num_classes=7): #([fat, wat, dX, dY, label, label_sizes])
+        """CAN BE USED for 1 pathway, or classic DM (normal+subsampled), or 2pathway, or 2pathway+subsampled.
             list_id, list_labels: lists of strings of names of files
             segment_size=25: size of training segments
             channels: list of channels to include in the normal pathway
             subsample: bool. do you want to use subsampled pathway of DM
             sampling: sampling strategy, list of size nr.channels
             channels_sub: list of channels to use for subsampled pathway
-            segment_size2: size of patches for second second input, None if no second input used
+            segment_size2: size of patches for second second input, should be odd. None if no second input used.
             channels2: which channels to use for second input, if in use."""
 
-        #COMMENTS: We hardcode some DeepMed details, eg outsize=segment_size-16, subsampled_seg_size = seg_size+2*16-2,
+        #COMMENTS: I hardcode some DeepMed details, eg outsize=segment_size-16, subsampled_seg_size = seg_size+2*16-2,
         #           subsampling factor=3, ...
-        # Also hardcoded are poem specifics. Such as nrclasses = 6
+        # Also hardcoded are certain poem specifics (3d, expected shape of data, etc).
         self.list_IDs = list_IDs
         self.labels = list_labels
         self.sampling = sampling
@@ -173,7 +96,7 @@ class POEMDatasetMultiInput(data.Dataset):
         self.f = 3 #subsample factor. can be also input? But: bigsegment%%f=0, and bigsegm/f==odd.
 
         self.in2 = False if segment_size2==None else True
-        self.in2seg = segment_size2
+        self.in2seg = segment_size2 #here we assume this one is not the biggest of all used segments.
         self.in2ch = channels2
 
     def __len__(self):
@@ -183,15 +106,17 @@ class POEMDatasetMultiInput(data.Dataset):
     def __getitem__(self, item):
         'get one sample: a subbatch of patches from 1 subject'
         #select subject
-        subj = pickle.load(open(self.list_IDs[item], 'rb'))
-        label = pickle.load(open(self.labels[item], 'rb'))
+        subjdata = np.load(self.list_IDs[item]) 
+        subj = subjdata['channels']
+        dic = subjdata['organ_sizes']
+        label = np.load(self.labels[item])
         #get patches according to sampling strategy.
         #first let's correct sampling for the given subj:
         localSampling = self.sampling
-        for org in range(6): #subj[10]:
-            razlika = self.sampling[org]-subj[10][org]
+        for org in range(num_classes):
+            razlika = self.sampling[org]-dic[org]
             if 0<razlika:
-                localSampling[org] = subj[10][org]
+                localSampling[org] = dic[org]
                 localSampling[0] += razlika
         #now get center points, careful with where you are allowed to sample:
         s = label.shape
@@ -200,17 +125,15 @@ class POEMDatasetMultiInput(data.Dataset):
         bigsegment = self.segment
         if self.subsample:
             bigsegment = self.subsegment
-        centres = []
-        for org in range(6):
-            organ = [c for c in subj[4+org] if (c[1]<s[1]-bigsegment and c[1]>=bigsegment and
-                                                c[0]<s[0]-bigsegment and c[0]>=bigsegment and
-                                                c[2]<s[2]-bigsegment and c[2]>=bigsegment)]
-            #rows = np.random.choice(subj[10][org], size=localSampling[org], replace=False)
-            #centres.append(subj[4 + org][rows])
-            np.random.shuffle(organ)
-            centres.append(organ[0:localSampling[org]])
 
-        centres = [ctr for ctr in centres if ctr]
+        label_for_sampling = label[bigsegment:-bigsegment, bigsegment:-bigsegment, bigsegment:-bigsegment] 
+        centres = []
+        for org in range(num_classes):
+            alla = np.column_stack(np.where(label_for_sampling==org))
+            alla = alla[np.random.choice(alla.shape[0], localSampling[org], replace=False),...]
+            centres.append(alla)
+
+        centres = [ctr+bigsegment for ctr in centres if ctr]
         centres = np.concatenate(centres, axis=0)
         #now sample:
         patches =  []
@@ -219,37 +142,30 @@ class POEMDatasetMultiInput(data.Dataset):
         truths  =  []
         #Fat,Wat,Xdist,Ydist = subj[0], subj[1], subj[2], subj[3]
         for center in centres:
-           # print("center") # TODO! Why sometimes more centres than other times?? aja, verjetno zato ker je zarad bugeca moj bigsegment bil huge...
             i,j,k = center
-            patches.append(torch.from_numpy(np.stack([
-                subj[ch][i-self.segment:i+self.segment+1,
-                        j-self.segment:j+self.segment+1,
-                        k-self.segment:k+self.segment+1] for ch in self.channels], axis=0)))
-            truths.append(torch.from_numpy(
-                label[i - self.labseg:i + self.labseg + 1,
-                    j - self.labseg:j + self.labseg + 1,
-                    k - self.labseg:k + self.labseg + 1]))
-
+            patches.append(torch.from_numpy(subj[self.channels, i-self.segment:i+self.segment+1,
+                                                j-self.segment:j+self.segment+1,
+                                                k-self.segment:k+self.segment+1]))
+            truths.append(torch.from_numpy(label[i - self.labseg:i + self.labseg + 1,
+                                                j - self.labseg:j + self.labseg + 1,
+                                                k - self.labseg:k + self.labseg + 1]))
         out = [torch.stack(patches)]
-       # print(out[0].shape)
 
         if self.subsample:
             for center in centres:
                 i, j, k = center
-                patchsub.append(torch.from_numpy(np.stack([
-                    subj[ch][i-self.subsegment:i+self.subsegment+1:self.f,
-                            j - self.subsegment:j + self.subsegment + 1:self.f,
-                            k - self.subsegment:k + self.subsegment + 1:self.f] for ch in self.subchannels], axis=0)))
+                patchsub.append(torch.from_numpy(subj[self.subchannels, i-self.subsegment:i+self.subsegment+1:self.f,
+                                                            j - self.subsegment:j + self.subsegment + 1:self.f,
+                                                            k - self.subsegment:k + self.subsegment + 1:self.f]))
                 # axis 0 bcs in pytorch channels first. so for each patch we append channels x sgm x sgm x sgm array.
             out.append(torch.stack(patchsub))
-    #        print(out[-1].shape)
         if self.in2:
+            self.in2seg = int((self.in2seg-1)/2)
             for center in centres:
                 i, j, k = center
-                patches2.append(torch.from_numpy(np.stack([
-                    subj[ch][i - self.in2seg:i + self.in2seg + 1:self.f,
-                            j - self.in2seg:j + self.in2seg + 1:self.f,
-                            k - self.in2seg:k + self.in2seg + 1:self.f] for ch in self.in2ch], axis=0)))
+                patches2.append(torch.from_numpy(subj[self.in2ch, i - self.in2seg:i + self.in2seg + 1:self.f,
+                                                j - self.in2seg:j + self.in2seg + 1:self.f,
+                                                k - self.in2seg:k + self.in2seg + 1:self.f]))
             out.append(torch.stack(patches2))
 
         out.append(torch.stack(truths))
