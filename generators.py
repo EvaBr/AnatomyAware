@@ -12,7 +12,7 @@ import numpy as np
 import re
 #from torchvision.transforms import ToTensor
 class POEMDatasetTEST(data.Dataset): #TODO
-    def __init__(self, list_IDs,  channels, subsampled=False, channels_sub=None, input2=None, channels2=None): #([fat, wat, dX, dY, label, label_sizes])
+    def __init__(self, list_IDs, label_IDs, channels, subsampled=False, channels_sub=None, input2=None, channels2=None): #([fat, wat, dX, dY, label, label_sizes])
         """Dataset, appropriate for apriori cut image loading. (Eg for VAL and TEST).
         list_IDs - list of names of all patches datas to include in loading.
         channels - list of which (of the 4 available) channels to give as normal (and possibily subsampled) input. 
@@ -22,6 +22,7 @@ class POEMDatasetTEST(data.Dataset): #TODO
         input2 - patchsize of second input. """
 
         self.list_IDs = list_IDs
+        self.labels = label_IDs
         self.channels = channels
         self.subsample = subsampled
         self.subchannels = channels_sub
@@ -37,7 +38,7 @@ class POEMDatasetTEST(data.Dataset): #TODO
         'get one patch'
         patch_name = self.list_IDs[item]
         patch = np.load(patch_name)
-
+       
         out = [torch.from_numpy(patch[self.channels, ...])]
 
         if self.subsample:
@@ -46,8 +47,12 @@ class POEMDatasetTEST(data.Dataset): #TODO
         if self.input2:
             s = (patch.shape[-1] - self.input2)//2 #assume patches as saved in memory are cubes!!!
             out.append(torch.from_numpy(patch[self.channels2, s:-s, s:-s, s:-s]))
+        
+        if label_IDs!=None: ## needed for validation
+            label = torch.from_numpy(np.load(self.label_IDs[item]))
+            out.append(label)
 
-        out.append("_OUT.".join(patch_name.split(".")))
+        out.append("_OUT.".join(patch_name.split("."))) ##needed for testing
         return out
 
 
@@ -181,3 +186,4 @@ def multi_input_collate(batch):
         out.append(torch.cat([item[i] for item in batch], dim=0))
 
     return [out, target] #is this structure ok for networks??
+

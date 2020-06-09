@@ -29,78 +29,57 @@ tqdm_ = partial(tqdm, ncols=100,
 
 #################################### READING DATA #############################
 def get_POEM_files(pot='/media/eva/Elements/backup-june2019'):
-    dists = pot+'/Desktop/research/PROJEKT2-DeepLearning/distmaps/'
-    fatwatmask = pot+'/Desktop/research/PROJEKT2-DeepLearning/procesiranDataset/POEM_segmentation_data_fatwat/converted/'
-    labele = pot+'/Desktop/research/PROJEKT2-DeepLearning/procesiranDataset/POEM_segment_all/converted/'
+    outpath = '/home/eva/Desktop/research/PROJEKT2-DeepLearning/AnatomyAwareDL/Data/'
+
+    dists = '/home/eva/Desktop/research/PROJEKT2-DeepLearning/distmaps/'
+    fatwatmask = '/home/eva/Desktop/research/PROJEKT2-DeepLearning/procesiranDataset/POEM_segmentation_data_fatwat/converted/'
+    labele = '/home/eva/Desktop/research/PROJEKT2-DeepLearning/procesiranDataset/POEM_segment_all/converted/'
 
     distx = glob.glob(dists+'*_x.nii'); distx.sort()
     disty = glob.glob(dists+'*_y.nii'); disty.sort()
     fats = glob.glob(fatwatmask+'*fat_content.nii'); fats.sort()
     wats = glob.glob(fatwatmask+'*wat_content.nii'); wats.sort()
     masks = glob.glob(fatwatmask + '*mask.nii'); masks.sort()
-    labels = glob.glob(labele+'croppedSegm*'); labels.sort()
-    #print(len(labels))
-    #print(len(wats))
-    #print(len(masks))
+    labels = glob.glob(labele+'CroppedSegmNew*'); labels.sort()
 
-    #list_ID = np.array([[fats[i], wats[i], distx[i], disty[i], labels[i], masks[i]] for i in range(len(distx))])
-    IDji = []
-    for i in range(len(distx)):
+    #rabimo shranit := np.array([fats[i], wats[i], distx[i], disty[i]]), dict, labels[i] for i in range(len(distx))])
+    rand_perm = np.random.permutation(len(distx))
+    #tr, va, te = rand_perm[0:30], rand_perm[30:40], rand_perm[40:]
+    for subjekt in range(len(distx)): #for every subject
+        i = rand_perm[subjekt]
+
         newlabel, slovar = get_label_and_info(labels[i], masks[i])
-        IDji.append([fats[i], wats[i], distx[i], disty[i], newlabel, slovar])
-    list_ID = np.array(IDji)
+        fat = nib.load(fats[i]).get_fdata()
+        wat = nib.load(wats[i]).get_fdata()
+        dix = nib.load(distx[i]).get_fdata()
+        diy = nib.load(disty[i]).get_fdata()
 
-    rand_perm = np.random.permutation(len(list_ID))
-    tr, va, te = rand_perm[0:30], rand_perm[30:40], rand_perm[40:]
-    train, validate, test = list_ID[tr], list_ID[va], list_ID[te]
+        subj = np.stack([fat, wat, dix, diy], axis=0)
+        #now save the object data in appropriate folder:
+        if subjekt<30: 
+            name = outpath + 'TRAINdata/'
+        elif subjekt<40:
+            name = outpath + 'VALdata/'
+        else:
+            name = outpath + 'TESTdata/'
+        np.savez(name + f'subj_{i}', channels = subj, organ_sizes = slovar, allow_pickle=False)
+        np.save(name + f'label_{i}', newlabel, allow_pickle=False)
+    print(f"done. example label shape: {newlabel.shape}, and channels: {subj.shape}, and dictionary: {slovar}")
 
-    with open('datasetTRAIN.pickle', 'wb') as handle:
-        pickle.dump(train, handle, protocol=pickle.HIGHEST_PROTOCOL)
-    with open('datasetVALIDATE.pickle', 'wb') as handle:
-        pickle.dump(validate, handle, protocol=pickle.HIGHEST_PROTOCOL)
-    with open('datasetTEST.pickle', 'wb') as handle:
-        pickle.dump(test, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    return "Preparing POEM files done."
 
-    return train, validate, test
+
 
 def get_label_and_info(label, mask):
     labela = nib.load(label).get_fdata()
     maska = nib.load(mask).get_fdata()
-    return (labela - 1*(maska==0)), {5: np.sum(labela == 5), 4: np.sum(labela == 4), 3: np.sum(labela == 3), 2: np.sum(labela == 2), 1: np.sum(labela == 1),
-     0: np.sum((maska > 0) & (labela == 0))}
+    return (labela - 1*(maska==0)), {6: np.sum(labela == 6), 5: np.sum(labela == 5), 4: np.sum(labela == 4), 
+                                    3: np.sum(labela == 3), 2: np.sum(labela == 2), 1: np.sum(labela == 1),
+                                    0: np.sum((maska > 0) & (labela == 0))}
 
 
-def createDatasets(filename='AnatomyAware/datasetTRAIN.pickle', folder='AnatomyAware/TRAINdata'):
-    with open(filename, 'rb') as handle:
-        subjekti = pickle.load(handle)
 
-    i=0
-    for subj in subjekti:
-      #  print(i)
-        fat = nib.load(subj[0]).get_fdata()
-      #  print(fat.shape)
-        wat = nib.load(subj[1]).get_fdata()
-        dix = nib.load(subj[2]).get_fdata()
-        diy = nib.load(subj[3]).get_fdata()
-      #  print(diy.shape)
-        #namesto subjekti[4] bi lahko uporabljal labela-(maska==0), ce neb mel ze naprej shranjen.
-        bckg = np.argwhere(subj[4]==0)
-        org1 = np.argwhere(subj[4]==1)
-        org2 = np.argwhere(subj[4]==2)
-        org3 = np.argwhere(subj[4]==3)
-        org4 = np.argwhere(subj[4]==4)
-        org5 = np.argwhere(subj[4]==5)
-        sezn = {0: len(bckg), 1: len(org1), 2: len(org2), 3: len(org3), 4: len(org4), 5: len(org5)}
-        lab = subj[4]; lab[lab<0]=0
-      #  print(lab.shape)
-        i=i+1
 
-        tmp = np.array([fat, wat, dix, diy, bckg, org1, org2, org3, org4, org5, sezn])
-        with open(folder+'/subj{0}.pickle'.format(i), 'wb') as handle:
-            pickle.dump(tmp, handle, protocol=pickle.HIGHEST_PROTOCOL)
-        with open(folder+'/label{0}.pickle'.format(i), 'wb') as handle:
-            pickle.dump(lab, handle, protocol=pickle.HIGHEST_PROTOCOL)
-        #print('sezn: ', sezn, ' od prej: ', subj[5])
 
 
 ##############################  PROCESSING SEGMENTED DATA #####################
@@ -119,12 +98,12 @@ def cut_patches(subj_list, patchsize, overlap, channels=4, outpath="", subsample
     pad = (bigpatch-patchsize)//2 #==15
     out_list = []
     for sub in subj_list:
-        subj = pickle.load(open(sub, 'rb'))
-        nr = re.findall(r'.*subj([0-9]*)\.pickle', sub)
+        subj = np.load(sub)
+        subj = subj['channels']
+        nr = re.findall(r'.*subj_([0-9]*)\.npz', sub)
 
         # now cut it to appropriate pieces
-        s = subj[0].shape  # (256, x, 256)
-        subj = np.stack([subj[i] for i in range(channels)])
+        s = subj.shape[1:]  # (256, x, 256)
         for i in range(s[0]//step+1): #cut so many pieces from left, and then one from right end, in case x,y,z not divisible with step.
             i_tmp = np.minimum(patchsize + (i + 1) * step, s[0])
             for j in range(s[1]//step+1):
@@ -164,6 +143,8 @@ def glue_patches(nr, path, patchsize, overlap, nb_classes=6): #glues, also perfo
     #imageio.imwrite(f'{path}out{nr}.jpg', to_save)
     np.save(f'{path}out{nr}.npy',to_save)
     return one_hot_whole_subj[np.newaxis,...]
+
+
 
 ##################################### LOSSES & METRICS ########################
 #weighted categ. crossentropy

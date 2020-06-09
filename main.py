@@ -26,6 +26,12 @@ epochs = 2
 sampling = [1,5,2,2,5,4,2] # [bckg, bladder, R kidney, liver, pancreas, spleen, L kidney]
 outpath = '/home/eva/Desktop/research/PROJEKT2-DeepLearning/AnatomyAwareDL/Results/'
 
+use_channels = [0,1] #which channels to use in orig pathway
+use_subsamp = True #do we use subsampled pathway?
+subsamp_channels = [0,1] #which channels to use in subsampleled pathway
+add_chan_size = None #do we have yet another pathway? If yes, how big is the segmentsize? Else None.
+add_chans = None #which channels to use in this additional pathway, if used?
+
 #
 continue_training = True #set to true if you want to load a net and train it further from there on. If yes, give string what_to_load
 what_to_load = "2020-04-14 22:00:37.557746" #string of the time as the unique id of the net you want to load
@@ -39,23 +45,25 @@ subbatch = sum(sampling)
 # get dataset and loaders
 subjekti = glob.glob(dataPath + 'TRAINdata/sub*'); subjekti.sort()
 labele = glob.glob(dataPath + 'TRAINdata/lab*'); labele.sort()
-subjekti_val = glob.glob(dataPath + 'VALdata/sub*'); subjekti.sort()
-labele_val = glob.glob(dataPath + 'VALdata/lab*'); labele.sort()
+subjekti_val = glob.glob(dataPath + 'VALdata/PATCHES/sub*'); subjekti.sort()
+labele_val = glob.glob(dataPath + 'VALdata/PATCHES/lab*'); labele.sort()
 
 #####################################################################################################
 #               NETWORK AND TRAINING OPTIONS
 #####################################################################################################
-#dataset = POEMDataset(subjekti[0:10], labele[0:10], 25, 9, sampling)
-dataset = POEMDatasetMultiInput(subjekti, labele, sampling, 25, channels=[0,1], subsample=True,
-                 channels_sub=[0,1])
-dataset_val = POEMDatasetMultiInput(subjekti_val, labele_val, sampling, 25, channels=[0,1], subsample=True,
-                 channels_sub=[0,1])
-train_loader = data.DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=multi_input_collate) #my_collate)
+dataset = POEMDatasetMultiInput(subjekti, labele, sampling, 25, channels=use_channels, subsample=use_subsamp,
+                 channels_sub=subsamp_channels, segment_size2=add_chan_size, channels2=add_chans)
+dataset_val = POEMDatasetMultiInput(subjekti_val, labele_val, sampling=[1,1,1,1,1,1,1], 25, channels=use_channels, subsample=use_subsamp,
+                 channels_sub=subsamp_channels, segment_size2=add_chan_size, channels2=add_chans)
+                 #POEMDatasetTEST(subjekti_val, labele_val, channels=use_channels, subsampled=use_subsamp, 
+                #channels_sub=subsamp_channels, input2=add_chan_size, channels2=add_chans)
+train_loader = data.DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=multi_input_collate)
 val_loader = data.DataLoader(dataset_val, batch_size=BATCH_SIZE, collate_fn=multi_input_collate)
 
 # create your optimizer, network and set parameters
 #net = OnePathway(in_channels=4, num_classes=num_classes, dropoutrateCon=0.2, dropoutrateFC=0.5)
-net = DualPathway(in_channels_orig=2, in_channels_subs=2, num_classes=num_classes, dropoutrateCon=0.2, dropoutrateFC=0.5, nonlin=nn.PReLU())
+net = DualPathway(in_channels_orig=len(use_channels), in_channels_subs=len(subsamp_channels), num_classes=num_classes, 
+                    dropoutrateCon=0.2, dropoutrateFC=0.5, nonlin=nn.PReLU())
 #net= DualPathwayNico(in_channels_orig=2, in_channels_subs=2, num_classes=num_classes, dropoutrateCon=0.2, dropoutrateFC=0.5, nonlin=nn.PReLU())
 net = net.float()
 
