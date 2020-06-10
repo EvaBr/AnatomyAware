@@ -115,13 +115,6 @@ class DualPathway(nn.Module):
     self.BNfc2 = nn.BatchNorm3d(150)
     self.finalclass = nn.Conv3d(150, num_classes, 1)
 
-    #if nonlin=="prelu":
-    #  self.nonlin = prelju()
-    #elif nonlin=="relu":
-    #  self.nonlin = F.relu
-    #else:
-    #  print(f"Nonlinearity {nonlin} not implemented. Using Relu instead.")
-    #  self.nonlin = F.relu
     self.nonlin = nonlin
 
   def forward(self, input1, input2): #(BN-ReLU-Conv-DropOut)
@@ -141,9 +134,165 @@ class DualPathway(nn.Module):
 
     input2 = self.upsample(input2)
 
-#    # now we can reshape `c` and `f` to 2D and concat them before fc layer
-#    combined = torch.cat((c.view(c.size(0), -1), f.view(f.size(0), -1)), dim=1)
-#    out = self.fc2(combined)
+    out = torch.cat((input1, input2), dim=1)
+    out = self.jointBN(out)  #Q: should we have the BatchNorm here?
+
+    out = self.nonlin(out)
+    out = self.fcconv1(out)
+    out = nn.Dropout3d(p=self.dropoutrateFC)(out)
+    
+    out = self.BNfc1(out) #Q: Should we have batchnorm here?
+    
+    out = self.nonlin(out)
+    out = self.fcconv2(out)
+    out = nn.Dropout3d(p=self.dropoutrateFC)(out)
+
+    out = self.BNfc2(out) #Q: Should we have batchnorm here?
+
+    out = self.nonlin(out)
+    out = self.finalclass(out)
+   # out = nn.Dropout3d(p=self.dropoutrateFC)(out) #TODO: Q: do we really keep the final dropout???
+
+    return out
+
+
+
+class MultiPathway(nn.Module):
+  def __init__(self, in_channels_orig, in_channels_subs, in_channels_add, join_at, join_to_orig, add_FM_sizes, num_classes=7, 
+                    dropoutrateCon=0.2, dropoutrateFC=0.5, nonlin=nn.PReLU()):
+    super(MultiPathway, self).__init__()
+    #join_at = nr of layer at which to join (concatenate) the third pathway. numberign goes from 0-9; ie if join_at==0, both pathways are concat. just 
+    #     after the first conv. If join_at==9, they're joined just before last (classifying) convolution.
+    #join_to_orig = True if third path joined to orig pathway. Otherwise joined to subsampled path (if exists).
+    #add_FM_sizes = list of nr of features per layer for third pathway. Convs are hardcoded to be 3x3 in all pathways.
+    # (Aslo keep in mind that input patch size for third pathway needs to be large enough such convolution pipeline...at least 1 + 2*len(add_FM_sizes))
+    #in_channels_add = nr of channels used in the thirdpathway
+    #in_channels_subs = nr of channels used in subsampled pathway. If None or 0, no subsampled pathway built.
+    # Additional pathway assumed mandatory, subsampled not mandatory.
+
+    ns = ""
+    self.using_subs = False
+    self.join_at = join_at
+    self.join_to_orig = join_to_orig
+    if in_channels_subs: 
+      ns = "_WithSubsampled"
+      self.using_subs = True
+    else:
+      self.join_to_orig = True
+    self.name = "MultiPathway"+ns
+
+    if join_to_orig:
+      expected_sizes = [23, 21, 19, 17, 15, 13, 11, 9, 9, 9]
+    else:
+      expected_sizes = [17, 15, 13, 11, 9, 7, 5, 3, 9, 9]
+    newsize = expected_sizes[join_at] #the size the third pathway should be resampled to, so that we can concatenate it.
+
+    self.dropoutrateCon = dropoutrateCon
+    self.dropoutrateFC = dropoutrateFC
+    self.nonlin = nonlin
+
+    self.conv1_p1 = nn.Conv3d(in_channels_orig, 30, 3)
+    self.conv1_p3 = nn.Conv3d(in_channels_add, add_FM_sizes[0], 3)
+    if in_channels_subs:
+      self.conv1_p2 = nn.Conv3d(in_channels_subs, 30, 3)
+    self.con_p1 = nn.ModuleList([])
+    self.con_p3 = nn.ModuleList([])
+    self.con_p2 = nn.ModuleList([])
+
+    self.BNs_p3 = nn.ModuleList([])
+    self.BNs_p1 = nn.ModuleList([]) 
+    self.BNs_p2 = nn.ModuleList([])  
+
+    #original and possibly subsampled layer:
+    deepmed_FM_sizes_orig = [30,40,40,40,40,50,50] #hardcoding for now.
+    deepmed_FM_sizes_subs = [] #hardcoding for now.
+    if in_channels_subs:
+      deepmed_FM_sizes_subs = [30,40,40,40,40,50,50]
+    if join_at<7:
+      if join_to_orig:
+        deepmed_FM_sizes_orig[join_at] += add_FM_sizes[-1] #where we join, we now have more FMs. 
+      else: 
+        deepmed_FM_sizes_subs[join_at] += add_FM_sizes[-1] #where we join, we now have more FMs. 
+    
+    #build orig path:
+    nrfeat=30
+    convols_p1 = []
+    batchnorms_p1 = []
+    for feats in deepmed_FM_sizes_orig:
+      convols_p1.append(nn.Conv3d(nrfeat, feats, 3))
+      batchnorms_p1.append(nn.BatchNorm3d(nrfeat))
+      nrfeat = feats
+    self.con_p1.extend(convols_p1)
+    self.BNs_p1.extend(batchnorms_p1)
+    #build subsampled path:
+    nrfeat=30
+    convols_p2 = []
+    batchnorms_p2 = []
+    for feats in deepmed_FM_sizes_subs:
+      convols_p2.append(nn.Conv3d(nrfeat, feats, 3))
+      batchnorms_p2.append(nn.BatchNorm3d(nrfeat))
+      nrfeat = feats
+    self.con_p2.extend(convols_p2)
+    self.BNs_p2.extend(batchnorms_p2) #will stay empty if no subsamp pathway used.
+    #build additional path:
+    nrfeat=add_FM_sizes[0]
+    convols_p3 = []
+    batchnorms_p3 = []
+    for feats in add_FM_sizes[1:]:
+      convols_p3.append(nn.Conv3d(nrfeat, feats, 3))
+      batchnorms_p3.append(nn.BatchNorm3d(nrfeat))
+      nrfeat = feats
+    self.con_p3.extend(convols_p3)
+    self.BNs_p3.extend(batchnorms_p3)
+
+    finals = [50, 150, 150]
+    if join_at>=7:
+      finals[join_at%7] += add_FM_sizes[-1]
+    if using_subs:
+      finals[0] += 50
+    
+    self.jointBN = nn.BatchNorm3d(finals[0])
+
+    self.upsample_s = partial(F.interpolate, scale_factor=3, mode='nearest') #upsampling for subsamled path, if used
+    self.upsample_a = partial(F.interpolate, size=(newsize, newsize, newsize)) #upsampling for the additional path
+
+    self.fcconv1 = nn.Conv3d(finals[0], 150, 1)
+    self.BNfc1 = nn.BatchNorm3d(finals[1])
+    self.fcconv2 = nn.Conv3d(finals[1], 150, 1)
+    self.BNfc2 = nn.BatchNorm3d(finals[2])
+    self.finalclass = nn.Conv3d(finals[2], num_classes, 1)
+
+  def forward(self, input1, input2, input3=None):
+    input1 = self.conv1_p1(input1)
+    if input3:
+      input3 = self.conv1_p3(input3)
+      input2 = self.conv1_p2(input2)
+      assert self.using_subs
+    else:
+      input3 = self.conv1_p3(input2)
+      assert self.using_subs==False
+
+    for p, bn in zip(self.con_p3, self.BNs_p3): #will be empty if input2 not used.
+      input3 = bn(input3)
+      input3 = self.nonlin(input3)
+      input3 = p(input3)
+      input3 = nn.Dropout3d(p=self.dropoutrateCon)(input3)
+
+    for p, bn in zip(self.con_p1, self.BNs_p1):
+      input1 = bn(input1)
+      input1 = self.nonlin(input1)
+      input1 = p(input1)
+      input1 = nn.Dropout3d(p=self.dropoutrateCon)(input1)
+
+    for p, bn in zip(self.con_p2, self.BNs_p2): #will be empty if input2 not used.
+      input2 = bn(input2)
+      input2 = self.nonlin(input2)
+      input2 = p(input2)
+      input2 = nn.Dropout3d(p=self.dropoutrateCon)(input2)
+
+
+    if self.using_subs: #if we are using subsampled thing
+      input2 = self.upsample_s(input2)
 
     out = torch.cat((input1, input2), dim=1)
     out = self.jointBN(out)  #Q: should we have the BatchNorm here?
@@ -162,14 +311,17 @@ class DualPathway(nn.Module):
 
     out = self.nonlin(out)
     out = self.finalclass(out)
-    out = nn.Dropout3d(p=self.dropoutrateFC)(out) #TODO: Q: do we really keep the final dropout???
-
+   # out = nn.Dropout3d(p=self.dropoutrateFC)(out) #TODO: Q: do we really keep the final dropout???
+#TODO: NEED TO ADD CONCATENATION OF input3!
     return out
 
 
 
 
-#more portable, but not working:
+
+
+
+#more portable, but not working (gives seg fault):
 
 class DenseLayer(nn.Module):
   def __init__(
