@@ -17,7 +17,7 @@ from functools import partial
 
 
 #TODO: leaky relu, batchnorm, anything else form the orig.paper? # DONE.
-#TODO: multiinput network!!
+#TODO: multiinput network!! #DONE.
 
 class OnePathway(nn.Module):
   def __init__(self, in_channels, num_classes, dropoutrateCon=0.2, dropoutrateFC=0.5, nonlin=nn.PReLU()):
@@ -359,7 +359,7 @@ class MultiPathway(nn.Module):
     out = self.fcconv2(out)
     out = nn.Dropout3d(p=self.dropoutrateFC)(out)
 
-   if self.join_at==9:    
+    if self.join_at==9:    
       out = toch.cat((out, input3), dim=1)
     out = self.BNfc2(out) #Q: Should we have batchnorm here?
 

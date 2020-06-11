@@ -113,7 +113,7 @@ def cut_patches(subj_list, patchsize, overlap, channels=4, outpath="", subsample
                     k_tmp = np.minimum(patchsize + (k + 1) * step, s[2])
                     patch = subj[:, i_tmp-patchsize:i_tmp, j_tmp-patchsize:j_tmp, k_tmp-patchsize:k_tmp]
                  #   print("cut out a patch of size ", patch.shape)
-                    nm = f"{outpath}/subj_{nr[0]}_{channels}_{i_tmp}_{j_tmp}_{k_tmp}.npy"
+                    nm = f"{outpath}subj_{nr[0]}_{channels}_{i_tmp}_{j_tmp}_{k_tmp}.npy"
                     np.save(nm, patch)
                     out_list.append(nm)
         if subsampledinput:
@@ -125,7 +125,7 @@ def cut_patches(subj_list, patchsize, overlap, channels=4, outpath="", subsample
                     for k in range(s[2] // step + 1):
                         k_tmp = np.minimum(patchsize + (k + 1) * step, s[2])
                         patch = subj[:, i_tmp-patchsize:i_tmp + 2*pad:3, j_tmp-patchsize:j_tmp + 2*pad:3, k_tmp-patchsize:k_tmp + 2*pad:3]
-                        nm = f"{outpath}/subj_{nr[0]}_{channels}_{i_tmp}_{j_tmp}_{k_tmp}_subsmpl.npy"
+                        nm = f"{outpath}subj_{nr[0]}_{channels}_{i_tmp}_{j_tmp}_{k_tmp}_subsmpl.npy"
                         np.save(nm, patch)
     return out_list
 
@@ -140,9 +140,9 @@ def glue_patches(nr, path, patchsize, overlap, nb_classes=7): #glues, also perfo
         out_img[:, s[0]-step:s[0], s[1]-step:s[1], s[2]-step:s[2]] = np.load(pch)
     one_hot_whole_subj = out_img[:, overlap*2:, overlap*2:, overlap*2:]
     #save a png:
-    to_save = np.argmax(one_hot_whole_subj, axis=0)
-    imageio.imwrite(f'{path}out{nr}.jpg', to_save)
-    np.save(f'{path}out{nr}.npy',to_save)
+    to_save = np.argmax(one_hot_whole_subj, axis=0) #cant, since imges are 3d
+    #imageio.imwrite(f'{path}out{nr}.jpg', to_save)
+    np.save(f'{path}results/out{nr}.npy',to_save)
     return one_hot_whole_subj[np.newaxis,...]
 
 
@@ -214,13 +214,18 @@ class SoftDiceLoss(nn.Module):
 def compareimages(GT, out, fati):
     'deprecated'
     offset=60
+    s=GT.shape
+    o=out.shape
+    if any(s!=o):
+        #we need to padd the output to appropriate size
+        a,b,c = [(i-j)//2 for i,j in zip(s,o)]
+        out = np.pad(out, pad_width=((a,a), (b,b), (c,c)), mode='constant', constant_values=0)
     maskedGT = np.ma.masked_where(GT == 0, GT)
     maskedOUT = np.ma.masked_where(out == 0, out)
-    s=GT.shape
     k=s[2]//2
     grid = plt.GridSpec(8, 8, wspace=0.3, hspace=0.9)
     
-    fig = plt.figure(figsize=(12, 6));
+    fig = plt.figure(figsize=(12, 6))
     plt.subplot(grid[0:7, 0:4])
     a = plt.imshow(fati[:, :, k], cmap='gray', extent=(0, 3*s[1], 0, s[0]))
     b = plt.imshow(maskedGT[:, :, k], cmap='jet', vmin=0, vmax=5, interpolation='none', alpha=0.7, extent=(0, 3*s[1], 0, s[0]))
@@ -240,26 +245,54 @@ def compareimages(GT, out, fati):
         fig.canvas.draw()
 
     slider.on_changed(update)
-
     plt.show()
 
 
-def VisualCompare(path_out, path_gt, path_ref, slice=44):
+def VisualCompare(gt, out, ref, slice=44):
     """loads target and the output segmentation and
-    visualizes them in the same size (ie cuts borders of target).
-    TODO Slider to move through z-direction for 3Dimages. """
-    out = np.load(path_out, allow_pickle=True)
-    gt = np.load(path_gt, allow_pickle=True)
-    ref = np.load(path_ref, allow_pickle=True)[0] #tking fat img as ref
-    out = np.pad(out, pad_width=8, mode='constant', constant_values=0) #hardcoded padding of output back to original size
-    #print("sizes: ", out.shape, gt.shape, ref.shape)
-    print("Nr of detected organ pixels: ", np.sum(out==1), np.sum(out==2), np.sum(out==3), np.sum(out==4), np.sum(out==5))
+    visualizes them on top of reference. """
+    s=GT.shape
+    o=out.shape
+    if any(s!=o):
+        #we need to padd the output to appropriate size
+        a,b,c = [(i-j)//2 for i,j in zip(s,o)]
+        out = np.pad(out, pad_width=((a,a), (b,b), (c,c)), mode='constant', constant_values=0)
+    detected = [np.sum(out==1), np.sum(out==2), np.sum(out==3), np.sum(out==4), np.sum(out==5), np.sum(out==6)]
+    actual = [np.sum(gt==1), np.sum(gt==2), np.sum(gt==3), np.sum(gt==4), np.sum(gt==5), np.sum(gt==6)]
+    print(f"Nr of detected (vs true) organ pixels: \n {detected} \n ({actual})")
     plt.figure(figsize=(15, 20))
-    #plt.subplot(1, 3, 1)
-    #plt.imshow(ref[:, slice, :].squeeze(), cmap="gray")
-    #plt.subplot(1, 3, 2)
-    #plt.imshow(gt[:, slice, :].squeeze(), vmin=0, vmax=5)
+    plt.subplot(1, 3, 1)
+    plt.imshow(ref[:, slice, :].squeeze(), cmap="gray")
+    plt.subplot(1, 3, 2)
+    plt.imshow(gt[:, slice, :].squeeze(), vmin=0, vmax=6)
+    plt.title("GT")
     plt.subplot(1, 3, 3)
-    plt.imshow(out[:, slice, :].squeeze(), vmin=0, vmax=5)
+    plt.imshow(out[:, slice, :].squeeze(), vmin=0, vmax=6)
+    plt.title("SEGM")
+    plt.show()
+
+
+
+#TODO if needed: now you load a network and train a bit more, the total metrics will be split into different CSVs. So ...
+# write a function that loads torch history to get a list of all checkpoints, and then plots the joint training history?
+def plot_total_history(checkpoint):
+    name = checkpoint['name']
+    alla = checkpoint['past_checkpoints']
+    plt.figure(figsize=(12,5))
+    plt.xlabel("Epochs")
+    plt.ylabel("Loss")
+    val_loss=[]
+    train_loss=[]
+    for session in alla[1:]:
+        df = pd.read_csv(outpath + f'DiceAndLoss_{session}_val.csv')
+        #df = df.append(pd.read_csv(outpath + f'DiceAndLoss_{session}_val.csv'), ignore_index=True)
+        plt.scatter(df['Epoch'], df['Loss'], label=None)
+        val_loss.append(df['Loss'])
+        
+        df = pd.read_csv(outpath + f'DiceAndLoss_{session}_train.csv')
+        plt.scatter(df['Epoch'], df['Loss'], label=None)
+        train_loss.append(df['Loss'])
+    plt.plot(val_loss, 'r-', label="Validation")    #Might need to rewrite this since pandas!
+    plt.plot(train_loss, 'b-', label="Training")    
 
 

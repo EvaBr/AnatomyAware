@@ -12,7 +12,7 @@ import numpy as np
 import re
 #from torchvision.transforms import ToTensor
 class POEMDatasetTEST(data.Dataset): #TODO
-    def __init__(self, list_IDs, label_IDs, channels, subsampled=False, channels_sub=None, input2=None, channels2=None): #([fat, wat, dX, dY, label, label_sizes])
+    def __init__(self, list_IDs, channels, subsampled=False, channels_sub=None, input2=None, channels2=None): #([fat, wat, dX, dY, label, label_sizes])
         """Dataset, appropriate for apriori cut image loading. (Eg for VAL and TEST).
         list_IDs - list of names of all patches datas to include in loading.
         channels - list of which (of the 4 available) channels to give as normal (and possibily subsampled) input. 
@@ -22,7 +22,7 @@ class POEMDatasetTEST(data.Dataset): #TODO
         input2 - patchsize of second input. """
 
         self.list_IDs = list_IDs
-        self.labels = label_IDs
+     #   self.labels = label_IDs
         self.channels = channels
         self.subsample = subsampled
         self.subchannels = channels_sub

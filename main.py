@@ -45,8 +45,8 @@ subbatch = sum(sampling)
 # get dataset and loaders
 subjekti = glob.glob(dataPath + 'TRAINdata/sub*'); subjekti.sort()
 labele = glob.glob(dataPath + 'TRAINdata/lab*'); labele.sort()
-subjekti_val = glob.glob(dataPath + 'VALdata/PATCHES/sub*'); subjekti.sort()
-labele_val = glob.glob(dataPath + 'VALdata/PATCHES/lab*'); labele.sort()
+subjekti_val = glob.glob(dataPath + 'VALdata/sub*'); subjekti.sort()
+labele_val = glob.glob(dataPath + 'VALdata/lab*'); labele.sort()
 
 #####################################################################################################
 #               NETWORK AND TRAINING OPTIONS
@@ -79,6 +79,7 @@ sampling_history = {}
 past_checkpoints = []
 if continue_training:
     checkpoint = torch.load(outpath + "Networks/" + net.name + "_" + what_to_load +".pt")
+    assert checkpoint['name'] == net.name
     net.load_state_dict(checkpoint['state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer'])
     sampling_history = checkpoint['sampling_history']
@@ -177,13 +178,10 @@ checkpoint = {
  #   'valid_loss_min': valid_loss,
     'state_dict': net.state_dict(),
     'optimizer': optimizer.state_dict(),
-    'sampling_history': sampling_history
+    'sampling_history': sampling_history,
+    'name': net.name
 }
 torch.save(checkpoint, outpath + "Networks/" + net.name + "_" + str(cas)+".pt")
 
 
-
-
-#TODO if needed: now you load a network and train a bit more, the total metrics will be split into different CSVs. So ...
-# write a function that loads torch history to get a list of all checkpoints, and then plots the joint training history?
 
