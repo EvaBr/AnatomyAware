@@ -11,10 +11,10 @@ patchsize = 52
 overlap = 8
 need_to_cut = False #True #change to True if any of test data parameters are changed.
 do_inference = True
-
+outpath = PATCHES #TODO
 
 if need_to_cut:
-    test_list = cut_patches(test_subjekti, patchsize, overlap*2, channels=4, outpath=outpath, subsampledinput=True)
+    test_list = cut_patches(test_subjekti, None, patchsize, overlap*2, channels=4, outpath=outpath, subsampledinput=True) #test_labele = None
     # best to always run 'cut_patches' with 4channels, since data loader itself takes care of cases with using different channels.
 else:
     test_list = glob.glob(outpath+"subj_*[0-9].npy")
@@ -24,9 +24,12 @@ test_loader = data.DataLoader(test_dataset, batch_size=4, shuffle=False, collate
 
 test_losses = []
 test_dices = []
+#TODO LOAD NET
 net.eval()
+net.to(device)
 i=0
 if False: #do_inference:
+#with torch.no_grad(): #TODO
     for slike, names in test_loader:
         print(f"Doing test inference, batch nr. {i+1}/{len(test_loader)}")
         i+=1
@@ -44,17 +47,17 @@ if False: #do_inference:
 #we need to glue all the patches appropriately:
 vsitestirani = []
 for subj in test_labele:
-    nr = re.findall(r'.*label([0-9]*)\.pickle', subj)
+    nr = re.findall(r'.*label([0-9]*)\.pickle', subj) #TODO! NOW WE HAVE NUMPY
     print("Saving tests on subject nr ", nr)
     vsitestirani.append(nr[0])
-    segmentacija = torch.from_numpy(glue_patches(nr[0], outpath, patchsize, overlap, nb_classes=6)) #glues one person, saves png, returns numpy one one-hot.
+    segmentacija = torch.from_numpy(glue_patches(nr[0], outpath, patchsize, overlap, nb_classes=7)) #glues one person, saves png, returns numpy one one-hot.
     #tarca = np.load(test_labele[subj]))
-    tarca = pickle.load(open(subj, 'rb'))
+    tarca = pickle.load(open(subj, 'rb')) #TODO NUMPY
     tarca = torch.from_numpy(tarca[np.newaxis, overlap:-overlap, overlap:-overlap, overlap:-overlap])
 
     test_loss = napaka(segmentacija, tarca.long())  #napaka needs onehot, does softmax inside.
     test_losses.append(test_loss.item())
-    dajs = dice_coeff_per_class(nn.Softmax(dim=1)(segmentacija), tarca, nb_classes=6) #Dice expects softmax!
+    dajs = dice_coeff_per_class(nn.Softmax(dim=1)(segmentacija), tarca, nb_classes=7) #Dice expects softmax!
     test_dices.append(dajs.data.numpy().squeeze())
 
     #Now also save a vtk of not one-hot, so you can compare in 3dslicer!

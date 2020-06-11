@@ -195,45 +195,73 @@ class MultiPathway(nn.Module):
     self.conv1_p3 = nn.Conv3d(in_channels_add, add_FM_sizes[0], 3)
     if in_channels_subs:
       self.conv1_p2 = nn.Conv3d(in_channels_subs, 30, 3)
-    self.con_p1 = nn.ModuleList([])
     self.con_p3 = nn.ModuleList([])
-    self.con_p2 = nn.ModuleList([])
+    self.con_p1_b = nn.ModuleList([])
+    self.con_p2_b = nn.ModuleList([])
 
     self.BNs_p3 = nn.ModuleList([])
-    self.BNs_p1 = nn.ModuleList([]) 
-    self.BNs_p2 = nn.ModuleList([])  
+    self.BNs_p1_b = nn.ModuleList([]) 
+    self.BNs_p2_b = nn.ModuleList([])  
+    
+    self.con_p1_a = nn.ModuleList([])
+    self.con_p2_a = nn.ModuleList([])
+
+    self.BNs_p1_a = nn.ModuleList([]) 
+    self.BNs_p2_a = nn.ModuleList([])  
 
     #original and possibly subsampled layer:
-    deepmed_FM_sizes_orig = [30,40,40,40,40,50,50] #hardcoding for now.
-    deepmed_FM_sizes_subs = [] #hardcoding for now.
+    deepmed_FM_sizes_orig_before = [30,40,40,40,40,50,50] #hardcoding for now.
+    deepmed_FM_sizes_subs_before = [] #hardcoding for now.
+    deepmed_FM_sizes_orig_after = [] #hardcoding for now.
+    deepmed_FM_sizes_subs_after = [] #hardcoding for now.
     if in_channels_subs:
-      deepmed_FM_sizes_subs = [30,40,40,40,40,50,50]
+      deepmed_FM_sizes_subs_before = [30,40,40,40,40,50,50]
     if join_at<7:
       if join_to_orig:
-        deepmed_FM_sizes_orig[join_at] += add_FM_sizes[-1] #where we join, we now have more FMs. 
+        deepmed_FM_sizes_orig_before[join_at] += add_FM_sizes[-1] #where we join, we now have more FMs. 
+        deepmed_FM_sizes_orig_after = deepmed_FM_sizes_orig_before[join_at:]
+        deepmed_FM_sizes_orig_before = deepmed_FM_sizes_orig_before[:join_at] 
       else: 
-        deepmed_FM_sizes_subs[join_at] += add_FM_sizes[-1] #where we join, we now have more FMs. 
+        deepmed_FM_sizes_subs_before[join_at] += add_FM_sizes[-1] #where we join, we now have more FMs. 
+        deepmed_FM_sizes_subs_after = deepmed_FM_sizes_subs_before[join_at:]
+        deepmed_FM_sizes_subs_before = deepmed_FM_sizes_subs_before[:join_at] 
     
     #build orig path:
     nrfeat=30
-    convols_p1 = []
-    batchnorms_p1 = []
-    for feats in deepmed_FM_sizes_orig:
-      convols_p1.append(nn.Conv3d(nrfeat, feats, 3))
-      batchnorms_p1.append(nn.BatchNorm3d(nrfeat))
+    convols_p1_b = []
+    batchnorms_p1_b = []
+    convols_p1_a = []
+    batchnorms_p1_a = []
+    for feats in deepmed_FM_sizes_orig_before:
+      convols_p1_b.append(nn.Conv3d(nrfeat, feats, 3))
+      batchnorms_p1_b.append(nn.BatchNorm3d(nrfeat))
       nrfeat = feats
-    self.con_p1.extend(convols_p1)
-    self.BNs_p1.extend(batchnorms_p1)
+    self.con_p1_b.extend(convols_p1_b)
+    self.BNs_p1_b.extend(batchnorms_p1_b)
+    for feats in deepmed_FM_sizes_orig_after:
+      convols_p1_a.append(nn.Conv3d(nrfeat, feats, 3))
+      batchnorms_p1_a.append(nn.BatchNorm3d(nrfeat))
+      nrfeat = feats
+    self.con_p1_a.extend(convols_p1_a)
+    self.BNs_p1_a.extend(batchnorms_p1_a)
     #build subsampled path:
     nrfeat=30
-    convols_p2 = []
-    batchnorms_p2 = []
-    for feats in deepmed_FM_sizes_subs:
-      convols_p2.append(nn.Conv3d(nrfeat, feats, 3))
-      batchnorms_p2.append(nn.BatchNorm3d(nrfeat))
+    convols_p2_b = []
+    batchnorms_p2_b = []
+    convols_p2_a = []
+    batchnorms_p2_a = []
+    for feats in deepmed_FM_sizes_subs_before:
+      convols_p2_b.append(nn.Conv3d(nrfeat, feats, 3))
+      batchnorms_p2_b.append(nn.BatchNorm3d(nrfeat))
       nrfeat = feats
-    self.con_p2.extend(convols_p2)
-    self.BNs_p2.extend(batchnorms_p2) #will stay empty if no subsamp pathway used.
+    self.con_p2_b.extend(convols_p2_b)
+    self.BNs_p2_b.extend(batchnorms_p2_b) #will stay empty if no subsamp pathway used.
+    for feats in deepmed_FM_sizes_subs_after:
+      convols_p2_a.append(nn.Conv3d(nrfeat, feats, 3))
+      batchnorms_p2_a.append(nn.BatchNorm3d(nrfeat))
+      nrfeat = feats
+    self.con_p2_a.extend(convols_p2_a)
+    self.BNs_p2_a.extend(batchnorms_p2_a) #will stay empty if no subsamp pathway used.
     #build additional path:
     nrfeat=add_FM_sizes[0]
     convols_p3 = []
@@ -248,7 +276,7 @@ class MultiPathway(nn.Module):
     finals = [50, 150, 150]
     if join_at>=7:
       finals[join_at%7] += add_FM_sizes[-1]
-    if using_subs:
+    if self.using_subs:
       finals[0] += 50
     
     self.jointBN = nn.BatchNorm3d(finals[0])
@@ -267,10 +295,10 @@ class MultiPathway(nn.Module):
     if input3:
       input3 = self.conv1_p3(input3)
       input2 = self.conv1_p2(input2)
-      assert self.using_subs
+      assert self.using_subs #3 inputs given, so subsampled path should be used
     else:
       input3 = self.conv1_p3(input2)
-      assert self.using_subs==False
+      assert self.using_subs==False #no input3 was given; so we assume we dont use subsampled path
 
     for p, bn in zip(self.con_p3, self.BNs_p3): #will be empty if input2 not used.
       input3 = bn(input3)
@@ -278,41 +306,66 @@ class MultiPathway(nn.Module):
       input3 = p(input3)
       input3 = nn.Dropout3d(p=self.dropoutrateCon)(input3)
 
-    for p, bn in zip(self.con_p1, self.BNs_p1):
+    for p, bn in zip(self.con_p1_b, self.BNs_p1_b):
       input1 = bn(input1)
       input1 = self.nonlin(input1)
       input1 = p(input1)
       input1 = nn.Dropout3d(p=self.dropoutrateCon)(input1)
 
-    for p, bn in zip(self.con_p2, self.BNs_p2): #will be empty if input2 not used.
+    for p, bn in zip(self.con_p2_b, self.BNs_p2_b): #will be empty if input2 not used.
       input2 = bn(input2)
       input2 = self.nonlin(input2)
       input2 = p(input2)
       input2 = nn.Dropout3d(p=self.dropoutrateCon)(input2)
 
+    #third pathway done, needs upsampling possibly:
+    input3 = self.upsample_a(input3)
+    #now we join it into the right pathway:
+    if self.join_to_orig:
+      input1 = toch.cat((input1, input3), dim=1)
+    else:
+      input2 = toch.cat((input2, input3), dim=1)
+    
+    #now complete the main pathways after joining in the additional one:
+    for p, bn in zip(self.con_p1_a, self.BNs_p1_a):
+      input1 = bn(input1)
+      input1 = self.nonlin(input1)
+      input1 = p(input1)
+      input1 = nn.Dropout3d(p=self.dropoutrateCon)(input1)
 
-    if self.using_subs: #if we are using subsampled thing
+    for p, bn in zip(self.con_p2_a, self.BNs_p2_a): #will be empty if input2 not used.
+      input2 = bn(input2)
+      input2 = self.nonlin(input2)
+      input2 = p(input2)
+      input2 = nn.Dropout3d(p=self.dropoutrateCon)(input2)
+
+    if self.using_subs: #if we are using subsampled path, join it in now
       input2 = self.upsample_s(input2)
+      input1 = torch.cat((input1, input2), dim=1)
+    if self.join_at==7:
+      input1 = toch.cat((input1, input3), dim=1)
 
-    out = torch.cat((input1, input2), dim=1)
-    out = self.jointBN(out)  #Q: should we have the BatchNorm here?
+    out = self.jointBN(input1)  #Q: should we have the BatchNorm here?
 
     out = self.nonlin(out)
     out = self.fcconv1(out)
     out = nn.Dropout3d(p=self.dropoutrateFC)(out)
-    
+
+    if self.join_at==8:    
+      out = toch.cat((out, input3), dim=1)
     out = self.BNfc1(out) #Q: Should we have batchnorm here?
     
     out = self.nonlin(out)
     out = self.fcconv2(out)
     out = nn.Dropout3d(p=self.dropoutrateFC)(out)
 
+   if self.join_at==9:    
+      out = toch.cat((out, input3), dim=1)
     out = self.BNfc2(out) #Q: Should we have batchnorm here?
 
     out = self.nonlin(out)
     out = self.finalclass(out)
-   # out = nn.Dropout3d(p=self.dropoutrateFC)(out) #TODO: Q: do we really keep the final dropout???
-#TODO: NEED TO ADD CONCATENATION OF input3!
+   # out = nn.Dropout3d(p=self.dropoutrateFC)(out) #TODO: Q: do we really keep the final dropout??
     return out
 
 

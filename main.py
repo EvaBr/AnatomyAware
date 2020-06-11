@@ -100,7 +100,7 @@ val_Dice = []
 val_epoche = []
 
 vsehslik = len(train_loader.dataset)*subbatch
-
+net.to(device)
 for epoch in range(epochs):
     print('Train Epoch: {}'.format(epoch))
     net.train()

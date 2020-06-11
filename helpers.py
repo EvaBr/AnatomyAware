@@ -28,7 +28,8 @@ tqdm_ = partial(tqdm, ncols=100,
                 bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [' '{rate_fmt}{postfix}]')
 
 #################################### READING DATA #############################
-def get_POEM_files(pot='/media/eva/Elements/backup-june2019'):
+def get_POEM_files():
+    #outpath='/media/eva/Elements/backup-june2019'
     outpath = '/home/eva/Desktop/research/PROJEKT2-DeepLearning/AnatomyAwareDL/Data/'
 
     dists = '/home/eva/Desktop/research/PROJEKT2-DeepLearning/distmaps/'
@@ -128,7 +129,7 @@ def cut_patches(subj_list, patchsize, overlap, channels=4, outpath="", subsample
                         np.save(nm, patch)
     return out_list
 
-def glue_patches(nr, path, patchsize, overlap, nb_classes=6): #glues, also performs nn.Softmax and saves png, returns numpy one one-hot
+def glue_patches(nr, path, patchsize, overlap, nb_classes=7): #glues, also performs nn.Softmax and saves png, returns numpy one one-hot
     patches = glob.glob(path+'subj_'+nr+'_*_OUT*')
     patches = natsort.natsorted(patches)
     sajz = np.array([nb_classes]+list(re.findall(r".*_([0-9]+)_([0-9]+)_([0-9]+)", patches[-1])[0]), np.int16)
@@ -140,7 +141,7 @@ def glue_patches(nr, path, patchsize, overlap, nb_classes=6): #glues, also perfo
     one_hot_whole_subj = out_img[:, overlap*2:, overlap*2:, overlap*2:]
     #save a png:
     to_save = np.argmax(one_hot_whole_subj, axis=0)
-    #imageio.imwrite(f'{path}out{nr}.jpg', to_save)
+    imageio.imwrite(f'{path}out{nr}.jpg', to_save)
     np.save(f'{path}out{nr}.npy',to_save)
     return one_hot_whole_subj[np.newaxis,...]
 

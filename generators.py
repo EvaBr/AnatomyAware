@@ -45,12 +45,13 @@ class POEMDatasetTEST(data.Dataset): #TODO
             patch_subs = np.load("_subsmpl.".join(patch_name.split(".")))
             out.append(torch.from_numpy(patch_subs[self.subchannels, ...]))
         if self.input2:
-            s = (patch.shape[-1] - self.input2)//2 #assume patches as saved in memory are cubes!!!
-            out.append(torch.from_numpy(patch[self.channels2, s:-s, s:-s, s:-s]))
+            ss = patch.shape[-1] #assume patches as saved in memory are cubes!!!
+            s = (ss - self.input2)//2 # And assume that input2 segment, if used, is <=than original segment size!
+            out.append(torch.from_numpy(patch[self.channels2, s:ss-s, s:ss-s, s:ss-s]))
         
-        if label_IDs!=None: ## needed for validation
-            label = torch.from_numpy(np.load(self.label_IDs[item]))
-            out.append(label)
+      #  if label_IDs!=None: ## needed for validation <- nope, we're using the other one for validaiton now.
+      #      label = torch.from_numpy(np.load(self.label_IDs[item]))
+      #      out.append(label)
 
         out.append("_OUT.".join(patch_name.split("."))) ##needed for testing
         return out
