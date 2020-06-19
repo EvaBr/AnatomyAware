@@ -5,3 +5,5 @@ Data_old/
 Data_old
 Results
 Results/
+Data*
+*.zip

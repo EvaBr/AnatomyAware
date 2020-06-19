@@ -71,7 +71,7 @@ class OnePathway(nn.Module):
     out = self.lastBN(out)
     out = self.nonlin(out)
 
-    out = self.finalclass(x)
+    out = self.finalclass(out)
     return out
 
 
@@ -165,7 +165,7 @@ class MultiPathway(nn.Module):
     #     after the first conv. If join_at==9, they're joined just before last (classifying) convolution.
     #join_to_orig = True if third path joined to orig pathway. Otherwise joined to subsampled path (if exists).
     #add_FM_sizes = list of nr of features per layer for third pathway. Convs are hardcoded to be 3x3 in all pathways.
-    # (Aslo keep in mind that input patch size for third pathway needs to be large enough such convolution pipeline...at least 1 + 2*len(add_FM_sizes))
+    # (Aslo keep in mind that input patch size for third pathway needs to be large enough for such convolution pipeline...at least 1 + 2*len(add_FM_sizes))
     #in_channels_add = nr of channels used in the thirdpathway
     #in_channels_subs = nr of channels used in subsampled pathway. If None or 0, no subsampled pathway built.
     # Additional pathway assumed mandatory, subsampled not mandatory.
@@ -218,11 +218,11 @@ class MultiPathway(nn.Module):
       deepmed_FM_sizes_subs_before = [30,40,40,40,40,50,50]
     if join_at<7:
       if join_to_orig:
-        deepmed_FM_sizes_orig_before[join_at] += add_FM_sizes[-1] #where we join, we now have more FMs. 
+        #deepmed_FM_sizes_orig_before[join_at] += add_FM_sizes[-1] #where we join, we now have more FMs. 
         deepmed_FM_sizes_orig_after = deepmed_FM_sizes_orig_before[join_at:]
         deepmed_FM_sizes_orig_before = deepmed_FM_sizes_orig_before[:join_at] 
       else: 
-        deepmed_FM_sizes_subs_before[join_at] += add_FM_sizes[-1] #where we join, we now have more FMs. 
+        #deepmed_FM_sizes_subs_before[join_at] += add_FM_sizes[-1] #where we join, we now have more FMs. 
         deepmed_FM_sizes_subs_after = deepmed_FM_sizes_subs_before[join_at:]
         deepmed_FM_sizes_subs_before = deepmed_FM_sizes_subs_before[:join_at] 
     
@@ -238,6 +238,7 @@ class MultiPathway(nn.Module):
       nrfeat = feats
     self.con_p1_b.extend(convols_p1_b)
     self.BNs_p1_b.extend(batchnorms_p1_b)
+    nrfeat = nrfeat + add_FM_sizes[-1]
     for feats in deepmed_FM_sizes_orig_after:
       convols_p1_a.append(nn.Conv3d(nrfeat, feats, 3))
       batchnorms_p1_a.append(nn.BatchNorm3d(nrfeat))
@@ -256,6 +257,7 @@ class MultiPathway(nn.Module):
       nrfeat = feats
     self.con_p2_b.extend(convols_p2_b)
     self.BNs_p2_b.extend(batchnorms_p2_b) #will stay empty if no subsamp pathway used.
+    nrfeat = nrfeat + add_FM_sizes[-1]
     for feats in deepmed_FM_sizes_subs_after:
       convols_p2_a.append(nn.Conv3d(nrfeat, feats, 3))
       batchnorms_p2_a.append(nn.BatchNorm3d(nrfeat))
@@ -292,13 +294,13 @@ class MultiPathway(nn.Module):
 
   def forward(self, input1, input2, input3=None):
     input1 = self.conv1_p1(input1)
-    if input3:
+    if not (input3 is None):
       input3 = self.conv1_p3(input3)
       input2 = self.conv1_p2(input2)
       assert self.using_subs #3 inputs given, so subsampled path should be used
     else:
       input3 = self.conv1_p3(input2)
-      assert self.using_subs==False #no input3 was given; so we assume we dont use subsampled path
+      assert self.using_subs==False, "If using_subs, 3inputs should be given!" #no input3 was given; so we assume we dont use subsampled path
 
     for p, bn in zip(self.con_p3, self.BNs_p3): #will be empty if input2 not used.
       input3 = bn(input3)
@@ -322,7 +324,7 @@ class MultiPathway(nn.Module):
     input3 = self.upsample_a(input3)
     #now we join it into the right pathway:
     if self.join_to_orig:
-      input1 = toch.cat((input1, input3), dim=1)
+      input1 = torch.cat((input1, input3), dim=1)
     else:
       input2 = toch.cat((input2, input3), dim=1)
     

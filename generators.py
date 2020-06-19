@@ -104,6 +104,7 @@ class POEMDatasetMultiInput(data.Dataset):
         self.in2 = False if segment_size2==None else True
         self.in2seg = segment_size2 #here we assume this one is not the biggest of all used segments.
         self.in2ch = channels2
+        self.num_classes = num_classes
 
     def __len__(self):
         'total number of samples'
@@ -112,14 +113,15 @@ class POEMDatasetMultiInput(data.Dataset):
     def __getitem__(self, item):
         'get one sample: a subbatch of patches from 1 subject'
         #select subject
-        subjdata = np.load(self.list_IDs[item]) 
+        subjdata = np.load(self.list_IDs[item], allow_pickle=True) 
         subj = subjdata['channels']
-        dic = subjdata['organ_sizes']
+        dic = subjdata['organ_sizes'].item()
         label = np.load(self.labels[item])
+        assert label.shape == subj[0].shape, "Shape mismatch."
         #get patches according to sampling strategy.
         #first let's correct sampling for the given subj:
         localSampling = self.sampling
-        for org in range(num_classes):
+        for org in range(self.num_classes):
             razlika = self.sampling[org]-dic[org]
             if 0<razlika:
                 localSampling[org] = dic[org]
@@ -132,15 +134,22 @@ class POEMDatasetMultiInput(data.Dataset):
         if self.subsample:
             bigsegment = self.subsegment
 
-        label_for_sampling = label[bigsegment:-bigsegment, bigsegment:-bigsegment, bigsegment:-bigsegment] 
+        label_for_sampling = label #[bigsegment:-bigsegment, bigsegment:-bigsegment, bigsegment:-bigsegment]  
+        #TODO! how to do a workaround for above? If I use this, no bladder is sampled. So for now, let's sample wherever, 
+        # and pad with 0 if extracted patch extends off image:
+        assert len(subj.shape)==4, f"Issue in padding: subject not 4dim; {subj.shape}"
+        subj = np.pad(subj, ((0,0), (bigsegment,bigsegment),(bigsegment,bigsegment), (bigsegment,bigsegment)), mode='constant', constant_values=0)
+        label = np.pad(label, ((bigsegment,bigsegment),(bigsegment,bigsegment),(bigsegment,bigsegment)), mode='constant', constant_values=0)
+        #
+        
         centres = []
-        for org in range(num_classes):
+        for org in range(self.num_classes):
             alla = np.column_stack(np.where(label_for_sampling==org))
             alla = alla[np.random.choice(alla.shape[0], localSampling[org], replace=False),...]
-            centres.append(alla)
+            centres.extend(alla)
 
-        centres = [ctr+bigsegment for ctr in centres if ctr]
-        centres = np.concatenate(centres, axis=0)
+        centres = [ctr+bigsegment for ctr in centres if ctr.size!=0]
+        
         #now sample:
         patches =  []
         patchsub = []
@@ -166,12 +175,12 @@ class POEMDatasetMultiInput(data.Dataset):
                 # axis 0 bcs in pytorch channels first. so for each patch we append channels x sgm x sgm x sgm array.
             out.append(torch.stack(patchsub))
         if self.in2:
-            self.in2seg = int((self.in2seg-1)/2)
+            in2seg = int((self.in2seg-1)/2)
             for center in centres:
                 i, j, k = center
-                patches2.append(torch.from_numpy(subj[self.in2ch, i - self.in2seg:i + self.in2seg + 1:self.f,
-                                                j - self.in2seg:j + self.in2seg + 1:self.f,
-                                                k - self.in2seg:k + self.in2seg + 1:self.f]))
+                patches2.append(torch.from_numpy(subj[self.in2ch, i - in2seg:i + in2seg + 1,
+                                                                j - in2seg:j + in2seg + 1,
+                                                                k - in2seg:k + in2seg + 1]))
             out.append(torch.stack(patches2))
 
         out.append(torch.stack(truths))

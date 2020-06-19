@@ -23,9 +23,10 @@ from tqdm import tqdm
 from functools import partial
 
 
-tqdm_ = partial(tqdm, ncols=100,
+tqdm_ = partial(tqdm, ncols=150,
                 leave=False,
                 bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [' '{rate_fmt}{postfix}]')
+
 
 #################################### READING DATA #############################
 def get_POEM_files():
@@ -155,6 +156,9 @@ def glue_patches(nr, path, patchsize, overlap, nb_classes=7): #glues, also perfo
 def dice_coeff(pred, target, nb_classes, weights):
     smooth = 0.0001
     #print(target.shape) #(12, 9,9,9)
+    #we might have index -1 present in target. That signalizes the index to ignore...
+    mask = torch.clamp(target+1., min=0, max=1) #with this we get [-1]->0, [0-n_class]->1
+    target = torch.clamp(target, min=0) #need to remove -1 index, to be able to use on_hot:
     target = F.one_hot(target.long(), num_classes=nb_classes).permute(0, 4, 1, 2, 3).contiguous()
     #print(target.shape) #(12, 6, 9,9,9)
     weights = torch.from_numpy(weights)
@@ -169,19 +173,25 @@ def dice_coeff(pred, target, nb_classes, weights):
 #    #We return shape Bx1: cause when you test, B=nr subj, so you don't want average Dice there....
 
     weights = weights.float().view(1, nb_classes, 1, 1, 1) #add dummy dimensions to broadcast when multiplying
+    mask = mask.unsqueeze(1).float()
     dims = tuple(range(1, target.ndimension())) #leave out batch-dim
-    intersection = torch.sum(pred * target * weights, dims) #weighted sum over all classes
-    cardinality = torch.sum((pred + target) * weights, dims) #weighted sum over all classes
+    intersection = torch.sum(pred * target * mask * weights, dims) #weighted sum over all classes
+    cardinality = torch.sum((pred + target) * mask * weights, dims) #weighted sum over all classes
     #print(dims)
     return (2. * intersection) / (cardinality + smooth)
 
 def dice_coeff_per_class(pred, target, nb_classes):
     smooth = 0.0001
     # print(target.shape) #(12, 9,9,9)
+    #we might have index -1 present in target. That signalizes the index to ignore...
+    mask = torch.clamp(target+1., min=0, max=1) #with this we get [-1]->0, [0-n_class]->1
+    mask = mask.unsqueeze(1).float() #unsqueeze at the channel dim, for broadcasting in multiplication
+    target = torch.clamp(target, min=0) #need to remove -1 index, to be able to use on_hot:
+
     target = F.one_hot(target.long(), num_classes=nb_classes).permute(0, 4, 1, 2, 3).contiguous()
     dims = tuple(range(2, target.ndimension())) #leave out batch-dim and class-dim
-    intersection = torch.sum(pred * target, dims)
-    cardinality = torch.sum(pred + target, dims)
+    intersection = torch.sum(pred * target * mask, dims)
+    cardinality = torch.sum((pred + target) * mask, dims)
     #print(dims)
     return (2. * intersection) / (cardinality + smooth)
 

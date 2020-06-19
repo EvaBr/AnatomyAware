@@ -17,23 +17,36 @@ import torch.optim as optim
 import numpy as np
 import pandas as pd
 import datetime as dt
+#import hiddenlayer as hl
 
 ######################################################################################################
 #               SET PARAMETERS
 ######################################################################################################
 BATCH_SIZE = 6
-epochs = 2
+epochs = 1
 sampling = [1,5,2,2,5,4,2] # [bckg, bladder, R kidney, liver, pancreas, spleen, L kidney]
 outpath = '/home/eva/Desktop/research/PROJEKT2-DeepLearning/AnatomyAwareDL/Results/'
 
-use_channels = [0,1] #which channels to use in orig pathway
-use_subsamp = True #do we use subsampled pathway?
-subsamp_channels = [0,1] #which channels to use in subsampleled pathway
-add_chan_size = None #do we have yet another pathway? If yes, how big is the segmentsize? Else None.
-add_chans = None #which channels to use in this additional pathway, if used?
+orig_channels = [0,1] #which channels to use in orig pathway
 
+use_subsamp = False #do we use subsampled pathway?
+subsamp_channels = None #[0,1] #which channels to use in subsampled pathway.
+assert use_subsamp!=(subsamp_channels is None)
+
+add_chan_size = 11 #do we have yet another pathway? If yes, how big is the segmentsize? Else NONE!!!
+add_channels = [2,3] #which channels to use in this additional pathway, if used.
+add_chan_FM_sizes = [30] #List of feature map sizes in the added pathway, if used. 
+add_join_at = 5 #At which layer in the pathway to fuse the added pathway, if in use. 
+add_to_orig = True #True if fusing into the original pathway, False if fusing to subsampled.
+
+#some checks:
+assert (((1 + 2*len(add_chan_FM_sizes))<=add_chan_size) or (add_chan_size is None)), "Segment size in 3rd pathway too small for the given FM list!"
+assert 0 <= add_join_at < 10
+nr_orig = len(orig_channels)
+nr_subs = len(subsamp_channels) if use_subsamp else None
+nr_add = None if add_chan_size is None else len(add_channels)
 #
-continue_training = True #set to true if you want to load a net and train it further from there on. If yes, give string what_to_load
+continue_training = False #True #set to true if you want to load a net and train it further from there on. If yes, give string what_to_load
 what_to_load = "2020-04-14 22:00:37.557746" #string of the time as the unique id of the net you want to load
 #
 
@@ -45,34 +58,37 @@ subbatch = sum(sampling)
 # get dataset and loaders
 subjekti = glob.glob(dataPath + 'TRAINdata/sub*'); subjekti.sort()
 labele = glob.glob(dataPath + 'TRAINdata/lab*'); labele.sort()
-subjekti_val = glob.glob(dataPath + 'VALdata/sub*'); subjekti.sort()
-labele_val = glob.glob(dataPath + 'VALdata/lab*'); labele.sort()
+subjekti_val = glob.glob(dataPath + 'VALdata/sub*'); subjekti_val.sort()
+labele_val = glob.glob(dataPath + 'VALdata/lab*'); labele_val.sort()
 
 #####################################################################################################
 #               NETWORK AND TRAINING OPTIONS
 #####################################################################################################
-dataset = POEMDatasetMultiInput(subjekti, labele, sampling, 25, channels=use_channels, subsample=use_subsamp,
-                 channels_sub=subsamp_channels, segment_size2=add_chan_size, channels2=add_chans)
-dataset_val = POEMDatasetMultiInput(subjekti_val, labele_val, sampling=[1,1,1,1,1,1,1], 25, channels=use_channels, subsample=use_subsamp,
-                 channels_sub=subsamp_channels, segment_size2=add_chan_size, channels2=add_chans)
-                 #POEMDatasetTEST(subjekti_val, labele_val, channels=use_channels, subsampled=use_subsamp, 
-                #channels_sub=subsamp_channels, input2=add_chan_size, channels2=add_chans)
+dataset = POEMDatasetMultiInput(subjekti, labele, sampling, segment_size=25, channels=orig_channels, subsample=use_subsamp,
+                 channels_sub=subsamp_channels, segment_size2=add_chan_size, channels2=add_channels, num_classes=num_classes)
+dataset_val = POEMDatasetMultiInput(subjekti_val, labele_val, sampling=[1,1,1,1,1,1,1], segment_size=25, channels=orig_channels, subsample=use_subsamp,
+                 channels_sub=subsamp_channels, segment_size2=add_chan_size, channels2=add_channels, num_classes=num_classes)
+                 #POEMDatasetTEST(subjekti_val, labele_val, channels=orig_channels, subsampled=use_subsamp, 
+                #channels_sub=subsamp_channels, input2=add_chan_size, channels2=add_channels)
 train_loader = data.DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=multi_input_collate)
 val_loader = data.DataLoader(dataset_val, batch_size=BATCH_SIZE, collate_fn=multi_input_collate)
 
 # create your optimizer, network and set parameters
-#net = OnePathway(in_channels=4, num_classes=num_classes, dropoutrateCon=0.2, dropoutrateFC=0.5)
-net = DualPathway(in_channels_orig=len(use_channels), in_channels_subs=len(subsamp_channels), num_classes=num_classes, 
-                    dropoutrateCon=0.2, dropoutrateFC=0.5, nonlin=nn.PReLU())
-#net= DualPathwayNico(in_channels_orig=2, in_channels_subs=2, num_classes=num_classes, dropoutrateCon=0.2, dropoutrateFC=0.5, nonlin=nn.PReLU())
+#net = OnePathway(in_channels=nr_orig, num_classes=num_classes, dropoutrateCon=0.2, dropoutrateFC=0.5)
+#net = DualPathway(in_channels_orig=nr_orig, in_channels_subs=nr_subs, num_classes=num_classes, 
+#                    dropoutrateCon=0.2, dropoutrateFC=0.5, nonlin=nn.PReLU())
+net = MultiPathway(in_channels_orig=nr_orig, in_channels_subs=nr_subs, in_channels_add=nr_add, 
+                    join_at=add_join_at, join_to_orig=add_to_orig, add_FM_sizes=add_chan_FM_sizes, num_classes=7, dropoutrateCon=0.2, dropoutrateFC=0.5, nonlin=nn.PReLU())
+
 net = net.float()
 
 optimizer = optim.Adam(net.parameters(), lr=0.001)
 
 #napaka = nn.CrossEntropyLoss(weight=None, ignore_index=0, reduction='mean') #weight za weightedxentropy, ignore_index ce ces ker klas ignorat.
-napaka = SoftDiceLoss(nb_classes=num_classes, weight=np.array([1., 1., 1., 1., 2., 1., 1.]))
+napaka = SoftDiceLoss(nb_classes=num_classes, weight=np.array([0.5, 1., 1., 1., 3., 1., 1.]))
 #######################################################################################################
 
+np.set_printoptions(precision=3, suppress=True) #for prettier printing
 
 prev_epochs = 0
 sampling_history = {}
@@ -88,8 +104,8 @@ if continue_training:
 
 
 
-log_interval = 1 #na kolko batchev reportas.
-val_interval = 5 #na kolko epoch delas validation.
+#log_interval = 100 #na kolko batchev reportas.
+val_interval = 1 #na kolko epoch delas validation.
 # train on cuda if available
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
@@ -109,8 +125,8 @@ for epoch in range(epochs):
     epoch_loss = 0.0
     epoch_dice = 0.0
 
-  #  tqdm_iter = tqdm_(enumerate(train_loader), total=len(train_loader), desc=">>Training: ")
-    for batch_idx, (notr, target) in enumerate(train_loader): #tqdm_iter:
+    tq_iter = tqdm_(enumerate(train_loader), total=len(train_loader), desc=">>Training: ")
+    for batch_idx, (notr, target) in tq_iter: #enumerate(train_loader): #tq_iter:
         notr, target = [torch.as_tensor(notri, device=device).float() for notri in notr], torch.as_tensor(target, device=device)
         #notr = notr.to(device)
         #target = target.to(device)
@@ -126,20 +142,28 @@ for epoch in range(epochs):
         dice_organs = dice_coeff_per_class(nn.Softmax(dim=1)(ven), target, nb_classes=num_classes)
         epoch_dice += dice_organs.sum(0).squeeze()
         running_loss += loss.item()
-        if batch_idx%log_interval==0:
-            print('[{:.0f}%]\tAccumulated batch loss: {:.6f}\tBatch generalized Dice: {:.6f}'.format(100.*batch_idx/len(train_loader),
-                                                running_loss/(batch_idx+1), dice.sum()/len(notr[0])))
-            print('dices batch averages by organ: ', dice_organs.mean(0).data.numpy())
+       # if batch_idx%log_interval==0:
+       #     print('[{:.0f}%]\tAccumulated batch loss: {:.6f}\tBatch generalized Dice: {:.6f}'.format(100.*batch_idx/len(train_loader),
+       #                                         running_loss/(batch_idx+1), dice.sum()/len(notr[0])))
+       #     print('dices batch averages by organ: ', dice_organs.mean(0).data.numpy())
+        tq_iter.set_postfix({"Batch avg loss": running_loss/(batch_idx+1), "batch Dice": dice.sum().item()/len(notr[0])})
 
-    if (epoch+1)%val_interval==0: #TODO add validation
+    epoch_loss = epoch_loss/vsehslik
+    epoch_dice = epoch_dice.squeeze()/vsehslik
+    print(f'>> Training finished. Averaged loss: {epoch_loss:.4f},\t average Dices: {epoch_dice.data.numpy()}')
+    training_losses.append(epoch_loss)
+    training_Dice.append(epoch_dice.data.numpy())
+
+    if (epoch+1)%val_interval==0: 
         val_epoche.append(epoch)
         val_loss_rolling = 0.0
         val_Dice_rolling = 0.0
         val_batches = len(val_loader)
+        tq_iter_val = tqdm_(val_loader, total=val_batches, desc=">>Validation: ")
         with torch.no_grad():
-            for x_val, y_val in val_loader:
-                x_val = x_val.to(device)
-                y_val = y_val.to(device)
+            for x_val, y_val in tq_iter_val: #val_loader:
+                x_val = [torch.as_tensor(xv,device=device).float() for xv in x_val]
+                y_val = torch.as_tensor(y_val, device=device)
                 net.eval()
                 y_hat = net(*x_val)
 
@@ -148,19 +172,16 @@ for epoch in range(epochs):
 
             val_losses.append(val_loss_rolling/val_batches)
             val_Dice.append(val_Dice_rolling.data.numpy()/val_batches)
-        print(f'>> VALIDATION: \n >> val loss: {val_losses[-1]},\t val Dices: {val_Dice[-1]}')
+        print(f'>> Validation finished. Average loss: {val_losses[-1]:.4f},\t average Dices: {val_Dice[-1]}')
 
-    epoch_loss = epoch_loss/vsehslik
-    epoch_dice = epoch_dice.squeeze()/vsehslik
-    print('Epoch {} finished. Averaged loss: {:.6f}, average Dices: {} \n'.format(epoch, epoch_loss, epoch_dice.data.numpy()))
-    training_losses.append(epoch_loss)
-    training_Dice.append(epoch_dice.data.numpy())
+
+#unique identifier:
+cas = dt.datetime.now()
 
 #add also infos on sampling of the given run to history:
 sampling_history[prev_epochs+epochs] = sampling
 
-print("Training finished. Saving metrics...")
-cas = dt.datetime.now()
+print("Training Done. Saving metrics...")
 dejta_tr = np.column_stack([np.array(training_losses), np.array(training_Dice)])
 df = pd.DataFrame(data=dejta_tr,    # values
     columns=np.array(['Loss', 'Dice Bckg', 'Dice Bladder', 'Dice R Kidney', 'Dice Liver', 'Dice Pancreas', 'Dice Spleen', 'Dice L Kidney']))
@@ -182,6 +203,6 @@ checkpoint = {
     'name': net.name
 }
 torch.save(checkpoint, outpath + "Networks/" + net.name + "_" + str(cas)+".pt")
-
+print(f"Done. Saved under id: {cas} ({net.name})")
 
 
