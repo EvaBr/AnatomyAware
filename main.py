@@ -22,25 +22,25 @@ import datetime as dt
 ######################################################################################################
 #               SET PARAMETERS
 ######################################################################################################
-BATCH_SIZE = 6
-epochs = 1
-sampling = [1,5,2,2,5,4,2] # [bckg, bladder, R kidney, liver, pancreas, spleen, L kidney]
+BATCH_SIZE = 8
+epochs = 40
+sampling = [1,3,1,1,4,1,1] # [bckg, bladder, R kidney, liver, pancreas, spleen, L kidney]
 outpath = '/home/eva/Desktop/research/PROJEKT2-DeepLearning/AnatomyAwareDL/Results/'
 
 orig_channels = [0,1] #which channels to use in orig pathway
 
-use_subsamp = False #do we use subsampled pathway?
-subsamp_channels = None #[0,1] #which channels to use in subsampled pathway.
+use_subsamp = True #do we use subsampled pathway?
+subsamp_channels = [0,1] # None #[0,1] #which channels to use in subsampled pathway.
 assert use_subsamp!=(subsamp_channels is None)
 
-add_chan_size = 11 #do we have yet another pathway? If yes, how big is the segmentsize? Else NONE!!!
+add_chan_size = None #11 #do we have yet another pathway? If yes, how big is the segmentsize? Else NONE!!!
 add_channels = [2,3] #which channels to use in this additional pathway, if used.
 add_chan_FM_sizes = [30] #List of feature map sizes in the added pathway, if used. 
 add_join_at = 5 #At which layer in the pathway to fuse the added pathway, if in use. 
 add_to_orig = True #True if fusing into the original pathway, False if fusing to subsampled.
 
 #some checks:
-assert (((1 + 2*len(add_chan_FM_sizes))<=add_chan_size) or (add_chan_size is None)), "Segment size in 3rd pathway too small for the given FM list!"
+assert ((add_chan_size is None) or ((1 + 2*len(add_chan_FM_sizes))<=add_chan_size)), "Segment size in 3rd pathway too small for the given FM list!"
 assert 0 <= add_join_at < 10
 nr_orig = len(orig_channels)
 nr_subs = len(subsamp_channels) if use_subsamp else None
@@ -75,17 +75,21 @@ val_loader = data.DataLoader(dataset_val, batch_size=BATCH_SIZE, collate_fn=mult
 
 # create your optimizer, network and set parameters
 #net = OnePathway(in_channels=nr_orig, num_classes=num_classes, dropoutrateCon=0.2, dropoutrateFC=0.5)
-#net = DualPathway(in_channels_orig=nr_orig, in_channels_subs=nr_subs, num_classes=num_classes, 
-#                    dropoutrateCon=0.2, dropoutrateFC=0.5, nonlin=nn.PReLU())
-net = MultiPathway(in_channels_orig=nr_orig, in_channels_subs=nr_subs, in_channels_add=nr_add, 
-                    join_at=add_join_at, join_to_orig=add_to_orig, add_FM_sizes=add_chan_FM_sizes, num_classes=7, dropoutrateCon=0.2, dropoutrateFC=0.5, nonlin=nn.PReLU())
+net = DualPathway(in_channels_orig=nr_orig, in_channels_subs=nr_subs, num_classes=num_classes, 
+                    dropoutrateCon=0.2, dropoutrateFC=0.5, nonlin=nn.PReLU())
+#net = MultiPathway(in_channels_orig=nr_orig, in_channels_subs=nr_subs, in_channels_add=nr_add, 
+#                    join_at=add_join_at, join_to_orig=add_to_orig, add_FM_sizes=add_chan_FM_sizes, num_classes=7, dropoutrateCon=0.2, dropoutrateFC=0.5, nonlin=nn.PReLU())
 
 net = net.float()
+net.apply(weights_init)
 
-optimizer = optim.Adam(net.parameters(), lr=0.001)
+optimizer = optim.Adam(net.parameters(), lr=0.001, betas=(0.9, 0.99), amsgrad=False)
 
 #napaka = nn.CrossEntropyLoss(weight=None, ignore_index=0, reduction='mean') #weight za weightedxentropy, ignore_index ce ces ker klas ignorat.
-napaka = SoftDiceLoss(nb_classes=num_classes, weight=np.array([0.5, 1., 1., 1., 3., 1., 1.]))
+#napaka1 = nn.CrossEntropyLoss(weight=None, ignore_index=-1, reduction='mean')
+#napaka2 = SoftDiceLoss(nb_classes=num_classes, weight=np.array([0, 1., 1., 1., 1., 1., 1.]))
+napaka1 = DiceLoss(nb_classes=num_classes, weight=np.array([0, 2, 1, 2, 2, 1, 1]))
+napaka2 = CrossEntropy(nb_classes=num_classes, weight=np.array([1, 1, 1, 2, 1, 1, 1]))
 #######################################################################################################
 
 np.set_printoptions(precision=3, suppress=True) #for prettier printing
@@ -118,6 +122,7 @@ val_epoche = []
 
 vsehslik = len(train_loader.dataset)*subbatch
 net.to(device)
+dl, cen = 0.8, 0.8
 for epoch in range(epochs):
     print('Train Epoch: {}'.format(epoch))
     net.train()
@@ -131,9 +136,10 @@ for epoch in range(epochs):
         #notr = notr.to(device)
         #target = target.to(device)
        # print(len(notr))
+        #print(target.shape)
         optimizer.zero_grad()   # zero the gradient buffers
         ven = net(*notr)
-        loss = napaka(ven, target.long())
+        loss = dl*napaka1(ven, target.long()) + cen*napaka2(ven, target.long())
         loss.backward()
         optimizer.step()
 
@@ -167,13 +173,14 @@ for epoch in range(epochs):
                 net.eval()
                 y_hat = net(*x_val)
 
-                val_loss_rolling += napaka(y_hat, y_val.long()).item()
+                val_loss_rolling += napaka1(y_hat, y_val.long()).item() + napaka2(y_hat, y_val.long()).item()
                 val_Dice_rolling += dice_coeff_per_class(nn.Softmax(dim=1)(y_hat), y_val, nb_classes=num_classes).mean(0).squeeze()
 
             val_losses.append(val_loss_rolling/val_batches)
             val_Dice.append(val_Dice_rolling.data.numpy()/val_batches)
         print(f'>> Validation finished. Average loss: {val_losses[-1]:.4f},\t average Dices: {val_Dice[-1]}')
-
+    
+    dl, cen = min(dl+0.01, 1), max(cen-0.01, 0.01) #update weighted loss
 
 #unique identifier:
 cas = dt.datetime.now()

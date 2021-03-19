@@ -1,3 +1,4 @@
+.vscode/
 stariNeti.py
 Data/
 Data
@@ -7,3 +8,8 @@ Results
 Results/
 Data*
 *.zip
+AnatomyNets
+AnatomyNets/
+__pycache__
+__pycache__/
+*.pyc

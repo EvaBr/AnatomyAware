@@ -21,6 +21,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from tqdm import tqdm
 from functools import partial
+from typing import List
+from torch import Tensor, einsum
 
 
 tqdm_ = partial(tqdm, ncols=150,
@@ -148,7 +150,16 @@ def glue_patches(nr, path, patchsize, overlap, nb_classes=7): #glues, also perfo
 
 
 
-##################################### LOSSES & METRICS ########################
+##################################### LOSSES & METRICS & WEIGHT INIT ########################
+#initializing weights
+
+def weights_init(m):
+    if type(m) == nn.Conv3d or type(m) == nn.ConvTranspose3d:
+        nn.init.xavier_normal_(m.weight.data)
+    elif type(m) == nn.BatchNorm3d:
+        m.weight.data.normal_(1.0, 0.02)
+        m.bias.data.fill_(0)
+
 #weighted categ. crossentropy
     
 
@@ -197,7 +208,7 @@ def dice_coeff_per_class(pred, target, nb_classes):
 
 
 class SoftDiceLoss(nn.Module):
-    def __init__(self, nb_classes=6, weight=np.array([1,1,1,1,1,1]), size_average=True):
+    def __init__(self, nb_classes=7, weight=np.array([1,1,1,1,1,1]), size_average=True):
         super(SoftDiceLoss, self).__init__()
         self.softmax = nn.Softmax(dim=1)
         self.weights = weight
@@ -213,9 +224,48 @@ class SoftDiceLoss(nn.Module):
 
 
 #more?
+class DiceLoss():
+    def __init__(self, nb_classes=7, weight=np.array([1,1,1,1,1,1,1])):
+        # Self.idc is used to filter out some classes of the target mask. Use fancy indexing
+        self.idc: List[int] = [i for i in np.arange(nb_classes) for j in range(weight[i])]
+        self.nb_classes = nb_classes
+
+    def __call__(self, probs: Tensor, target: Tensor) -> Tensor:
+        target = torch.clamp(target, min=0) #need to remove -1 index, to be able to use on_hot:
+        target = F.one_hot(target.long(), num_classes=self.nb_classes).permute(0, 4, 1, 2, 3).contiguous()
+        probs = nn.Softmax(dim=1)(probs)
+
+        pc = probs[:, self.idc, ...].type(torch.float32)
+        tc = target[:, self.idc, ...].type(torch.float32)
+
+        intersection: Tensor = einsum("bcwhl,bcwhl->bc", pc, tc)
+        union: Tensor = (einsum("bcwhl->bc", pc) + einsum("bcwhl->bc", tc))
+
+        divided: Tensor = 1 - (2 * intersection + 1e-10) / (union + 1e-10)
+
+        loss = divided.mean()
+
+        return loss
 
 
+class CrossEntropy():
+    def __init__(self, nb_classes=7, weight=np.array([1,1,1,1,1,1,1])):
+        # Self.idc is used to filter out some classes of the target mask. Use fancy indexing
+        self.idc: List[int] = [i for i in np.arange(nb_classes) for j in range(weight[i])]
+        self.nb_classes = nb_classes
 
+    def __call__(self, probs: Tensor, target: Tensor) -> Tensor:
+        target = torch.clamp(target, min=0) #need to remove -1 index, to be able to use on_hot:
+        target = F.one_hot(target.long(), num_classes=self.nb_classes).permute(0, 4, 1, 2, 3).contiguous()
+        probs = nn.Softmax(dim=1)(probs)
+        
+        log_p: Tensor = (probs[:, self.idc, ...] + 1e-10).log()
+        mask: Tensor = target[:, self.idc, ...].type(torch.float32)
+
+        loss = - einsum("bcwhl,bcwhl->", mask, log_p)
+        loss /= mask.sum() + 1e-10
+
+        return loss
 
 
 
@@ -226,7 +276,7 @@ def compareimages(GT, out, fati):
     offset=60
     s=GT.shape
     o=out.shape
-    if any(s!=o):
+    if s!=o:
         #we need to padd the output to appropriate size
         a,b,c = [(i-j)//2 for i,j in zip(s,o)]
         out = np.pad(out, pad_width=((a,a), (b,b), (c,c)), mode='constant', constant_values=0)
@@ -263,7 +313,7 @@ def VisualCompare(gt, out, ref, slice=44):
     visualizes them on top of reference. """
     s=GT.shape
     o=out.shape
-    if any(s!=o):
+    if s!=o:
         #we need to padd the output to appropriate size
         a,b,c = [(i-j)//2 for i,j in zip(s,o)]
         out = np.pad(out, pad_width=((a,a), (b,b), (c,c)), mode='constant', constant_values=0)

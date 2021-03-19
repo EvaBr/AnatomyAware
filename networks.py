@@ -326,7 +326,7 @@ class MultiPathway(nn.Module):
     if self.join_to_orig:
       input1 = torch.cat((input1, input3), dim=1)
     else:
-      input2 = toch.cat((input2, input3), dim=1)
+      input2 = torch.cat((input2, input3), dim=1)
     
     #now complete the main pathways after joining in the additional one:
     for p, bn in zip(self.con_p1_a, self.BNs_p1_a):
@@ -345,7 +345,7 @@ class MultiPathway(nn.Module):
       input2 = self.upsample_s(input2)
       input1 = torch.cat((input1, input2), dim=1)
     if self.join_at==7:
-      input1 = toch.cat((input1, input3), dim=1)
+      input1 = torch.cat((input1, input3), dim=1)
 
     out = self.jointBN(input1)  #Q: should we have the BatchNorm here?
 
@@ -354,7 +354,7 @@ class MultiPathway(nn.Module):
     out = nn.Dropout3d(p=self.dropoutrateFC)(out)
 
     if self.join_at==8:    
-      out = toch.cat((out, input3), dim=1)
+      out = torch.cat((out, input3), dim=1)
     out = self.BNfc1(out) #Q: Should we have batchnorm here?
     
     out = self.nonlin(out)
@@ -362,7 +362,7 @@ class MultiPathway(nn.Module):
     out = nn.Dropout3d(p=self.dropoutrateFC)(out)
 
     if self.join_at==9:    
-      out = toch.cat((out, input3), dim=1)
+      out = torch.cat((out, input3), dim=1)
     out = self.BNfc2(out) #Q: Should we have batchnorm here?
 
     out = self.nonlin(out)
