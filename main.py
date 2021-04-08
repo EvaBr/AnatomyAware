@@ -18,13 +18,15 @@ import numpy as np
 import pandas as pd
 import datetime as dt
 from tqdm import tqdm
+np.set_printoptions(precision=3, suppress=True)
+
 ######################################################################################################
 #               SET PARAMETERS
 ######################################################################################################
 BATCH_SIZE = 4 #8
 epochs = 10
 #sampling = [1,5,2,2,5,4,2] # [bckg, bladder, R kidney, liver, pancreas, spleen, L kidney]
-sampling = [0,4,2,1,4,3,1]
+sampling = [0,4,2,2,4,3,2]
 outpath = 'Results/' #'/home/eva/Desktop/research/PROJEKT2-DeepLearning/AnatomyAwareDL/Results/'
 
 use_channels = [0,1] #which channels to use in orig pathway
@@ -95,7 +97,7 @@ val_interval = 1 #na kolko epoch delas validation.
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 print(f"Running on {device}...")
 
-napaka = SoftDiceLoss(nb_classes=num_classes, weight=torch.tensor([0., 2., 1., 1., 3., 2., 1.], device=device))
+napaka = SoftDiceLoss(nb_classes=num_classes, weight=torch.tensor([0., 2., 2., 3., 1., 2., 2.], device=device))
 
 # training loop:
 training_losses = []
@@ -140,7 +142,7 @@ for epoch in range(epochs):
 
     epoch_loss = epoch_loss/vsehslik
     epoch_dice = epoch_dice.squeeze()/vsehslik
-    print('>> TRAINING: Epoch {} finished. \nAveraged loss: {:.6f}, average Dices: {} \n'.format(epoch, epoch_loss, epoch_dice.detach().cpu().numpy()))
+    print('>> TRAINING: Epoch {} finished. \nAveraged loss:  {:.4f}, avg Dices: {}'.format(epoch, epoch_loss, epoch_dice.detach().cpu().numpy()))
     training_losses.append(epoch_loss)
     training_Dice.append(epoch_dice.detach().cpu().numpy())
 
@@ -162,7 +164,7 @@ for epoch in range(epochs):
 
             val_losses.append(val_loss_rolling/val_batches)
             val_Dice.append(val_Dice_rolling.detach().cpu().numpy()/val_batches)
-        print(f'>> VALIDATION: \n >> val loss: {val_losses[-1]},  val Dices: {val_Dice[-1]}')
+        print(f'>> VALIDATION: \n Total val loss: {val_losses[-1]:.4f},  val Dices: {val_Dice[-1]}')
 
    
 #add also infos on sampling of the given run to history:
