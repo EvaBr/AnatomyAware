@@ -90,11 +90,12 @@ class POEMDatasetMultiInput(data.Dataset):
         self.list_IDs = list_IDs
         self.labels = list_labels
         self.sampling = sampling
+        self.num_classes = num_classes
         self.subbatch = sum(sampling)
         self.segment = int((segment_size-1)/2)
         self.channels = channels
-        self.labseg = int((segment_size-16-1)/2)   # x + N ->(:3)-> (x+2)/3+(N-2)/3 ->(-16)-> (x+2)/3-16+(N-2)/3 ->(*3)-> x+2+(N-2)/3*3-16*3 ==x-16
-                                                                                            # (N-2)/3*3 = 2*16 - 2
+        self.outsize = int((segment_size-16)/2)   # x + N ->(:3)-> (x+2)/3+(N-2)/3 ->(-16)-> (x+2)/3-16+(N-2)/3 ->(*3)-> x+2+(N-2)/3*3-16*3 ==x-16
+                                                                                           # (N-2)/3*3 = 2*16 - 2
         self.subsample = subsample
         self.subchannels = channels_sub
         self.subsegment = 27  #obv should be bigger than segment.
@@ -112,19 +113,20 @@ class POEMDatasetMultiInput(data.Dataset):
     def __getitem__(self, item):
         'get one sample: a subbatch of patches from 1 subject'
         #select subject
-        subjdata = np.load(self.list_IDs[item]) 
+        subjdata = np.load(self.list_IDs[item], allow_pickle=True) 
         subj = subjdata['channels']
-        dic = subjdata['organ_sizes']
+        dic = subjdata['organ_sizes'].item()
         label = np.load(self.labels[item])
         #get patches according to sampling strategy.
         #first let's correct sampling for the given subj:
         localSampling = self.sampling
-        for org in range(num_classes):
+        for org in range(self.num_classes):
             razlika = self.sampling[org]-dic[org]
             if 0<razlika:
                 localSampling[org] = dic[org]
                 localSampling[0] += razlika
-        #now get center points, careful with where you are allowed to sample:
+        #now get center points, careful with where you are allowed to sample - try to use point as centre, if you cant, just sample 
+        #somehting around it:
         s = label.shape
         #print(subj[0].shape)
         #print(s)
@@ -132,14 +134,15 @@ class POEMDatasetMultiInput(data.Dataset):
         if self.subsample:
             bigsegment = self.subsegment
 
-        label_for_sampling = label[bigsegment:-bigsegment, bigsegment:-bigsegment, bigsegment:-bigsegment] 
+  #      label_for_sampling = label[bigsegment:-bigsegment, bigsegment:-bigsegment, bigsegment:-bigsegment] 
         centres = []
-        for org in range(num_classes):
-            alla = np.column_stack(np.where(label_for_sampling==org))
+        for org in range(self.num_classes):
+  #          alla = np.column_stack(np.where(label_for_sampling==org))
+            alla = np.column_stack(np.where(label==org))
             alla = alla[np.random.choice(alla.shape[0], localSampling[org], replace=False),...]
             centres.append(alla)
 
-        centres = [ctr+bigsegment for ctr in centres if ctr]
+ #       centres = [ctr+bigsegment for ctr in centres if ctr]
         centres = np.concatenate(centres, axis=0)
         #now sample:
         patches =  []
@@ -147,31 +150,50 @@ class POEMDatasetMultiInput(data.Dataset):
         patches2 = []
         truths  =  []
         #Fat,Wat,Xdist,Ydist = subj[0], subj[1], subj[2], subj[3]
+        newcentres = []
         for center in centres:
-            i,j,k = center
-            patches.append(torch.from_numpy(subj[self.channels, i-self.segment:i+self.segment+1,
-                                                j-self.segment:j+self.segment+1,
-                                                k-self.segment:k+self.segment+1]))
-            truths.append(torch.from_numpy(label[i - self.labseg:i + self.labseg + 1,
-                                                j - self.labseg:j + self.labseg + 1,
-                                                k - self.labseg:k + self.labseg + 1]))
+            starts = center-self.segment
+            ends = center+self.segment+1
+            below_start = [0 if st>=0 else -st for st in starts]
+            over_ends = [0 if en<=0 else -en for en in ends-s]
+            assert sum(np.multiply(over_ends, below_start))==0, (below_start, over_ends) #we expect to have problem max on one side of any dim
+         #   print(f"old starts: {starts}, old ends:{ends}, over_ends: {over_ends}")
+         #   if sum(over_ends+below_start)!=0:
+         #       print(f"old starts: {starts}, old ends:{ends}, over_ends: {over_ends}")
+         #       print(f"new starts: {starts+over_ends+below_start}, new ends: {ends+over_ends+below_start}")
+            starts = starts+over_ends+below_start
+            ends = ends+over_ends+below_start
+         #   print(f"new starts: {starts}, new ends: {ends}")
+            #get the new centre-point for subsampled inp, if needed:
+            newcentres.append(starts+self.segment)
+            
+            newpatch = subj[self.channels, starts[0]:ends[0],
+                                            starts[1]:ends[1],
+                                            starts[2]:ends[2]]
+
+            patches.append(torch.from_numpy(newpatch))
+            truths.append(torch.from_numpy(label[starts[0]+8:ends[0]-8,
+                                                starts[1] +8:ends[1]-8,
+                                                starts[2] +8:ends[2]-8]))
         out = [torch.stack(patches)]
 
         if self.subsample:
-            for center in centres:
+            for center in newcentres:
                 i, j, k = center
-                patchsub.append(torch.from_numpy(subj[self.subchannels, i-self.subsegment:i+self.subsegment+1:self.f,
-                                                            j - self.subsegment:j + self.subsegment + 1:self.f,
-                                                            k - self.subsegment:k + self.subsegment + 1:self.f]))
+                padded = np.pad(subj, ((0,), (self.subsegment,), (self.subsegment,), (self.subsegment,)), 'symmetric')
+                patchsub.append(torch.from_numpy(padded[self.subchannels, i:i + self.subsegment*2 + 1:self.f,
+                                                                          j:j + self.subsegment*2 + 1:self.f,
+                                                                          k:k + self.subsegment*2 + 1:self.f]))
                 # axis 0 bcs in pytorch channels first. so for each patch we append channels x sgm x sgm x sgm array.
             out.append(torch.stack(patchsub))
         if self.in2:
             self.in2seg = int((self.in2seg-1)/2)
-            for center in centres:
+            for center in newcentres:
                 i, j, k = center
-                patches2.append(torch.from_numpy(subj[self.in2ch, i - self.in2seg:i + self.in2seg + 1:self.f,
-                                                j - self.in2seg:j + self.in2seg + 1:self.f,
-                                                k - self.in2seg:k + self.in2seg + 1:self.f]))
+                padded = np.pad(subj, ((0,), (self.in2seg,), (self.in2seg,), (self.in2seg,)), 'symmetric')
+                patches2.append(torch.from_numpy(padded[self.in2ch, i:i + self.in2seg*2 + 1:self.f,
+                                                                    j:j + self.in2seg*2 + 1:self.f,
+                                                                    k:k + self.in2seg*2 + 1:self.f]))
             out.append(torch.stack(patches2))
 
         out.append(torch.stack(truths))

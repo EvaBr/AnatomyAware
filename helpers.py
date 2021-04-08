@@ -155,18 +155,13 @@ def glue_patches(nr, path, patchsize, overlap, nb_classes=7): #glues, also perfo
 def dice_coeff(pred, target, nb_classes, weights):
     smooth = 0.0001
     #print(target.shape) #(12, 9,9,9)
+    target = torch.clamp(target, min=0) #for now the index -1 that we are supposed to ignore is treated as bckg. 
     target = F.one_hot(target.long(), num_classes=nb_classes).permute(0, 4, 1, 2, 3).contiguous()
-    #print(target.shape) #(12, 6, 9,9,9)
-    weights = torch.from_numpy(weights)
-
-    #now target is also of size BxCxHxWxL, with entries 1/0
-#    num = pred.size(0)
-#    m1 = pred.contiguous().view(num, -1)  # Flatten
-#    m2 = target.contiguous().view(num, -1)  #torch.from_numpy( Flatten
-#    intersection = torch.sum(m1 * m2.float())
-#
-#    return (2. * intersection + smooth) / (torch.sum(m1) + torch.sum(m2.float()) + smooth)
-#    #We return shape Bx1: cause when you test, B=nr subj, so you don't want average Dice there....
+    #print(target.shape) #(12, 8, 9,9,9)
+    #we did +1 in case there was a -1 index to ignore when computing dice. Now fix target to ignore this artifical 0 class:
+    #target = target[:, 1:, ...] <- samo to ni dosti... rabu bi tut v 'pred' ignorirat ta index :( 
+    
+   # weights = torch.from_numpy(weights)
 
     weights = weights.float().view(1, nb_classes, 1, 1, 1) #add dummy dimensions to broadcast when multiplying
     dims = tuple(range(1, target.ndimension())) #leave out batch-dim
@@ -178,6 +173,7 @@ def dice_coeff(pred, target, nb_classes, weights):
 def dice_coeff_per_class(pred, target, nb_classes):
     smooth = 0.0001
     # print(target.shape) #(12, 9,9,9)
+    target = torch.clamp(target, min=0)
     target = F.one_hot(target.long(), num_classes=nb_classes).permute(0, 4, 1, 2, 3).contiguous()
     dims = tuple(range(2, target.ndimension())) #leave out batch-dim and class-dim
     intersection = torch.sum(pred * target, dims)
@@ -187,11 +183,12 @@ def dice_coeff_per_class(pred, target, nb_classes):
 
 
 class SoftDiceLoss(nn.Module):
-    def __init__(self, nb_classes=6, weight=np.array([1,1,1,1,1,1]), size_average=True):
+    def __init__(self, nb_classes, weight, size_average=True):
         super(SoftDiceLoss, self).__init__()
         self.softmax = nn.Softmax(dim=1)
         self.weights = weight
         self.classes = nb_classes
+        assert len(weight)==nb_classes, f"Only {len(weight)} weights given for {nb_classes} classes!"
 
     def forward(self, logits, targets):
         probs = self.softmax(logits)
