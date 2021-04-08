@@ -1,10 +1,13 @@
+DONE :
 - dodaj shranjevanje networka, a ne bos rabla skos od zacetka trenirat. Fajn bi blo tut shranit parametr history of treningov, 
 	da bos vedla kako pol druge verzije networka trenirat
 - add validation, 
+- loci ledvice
+
+
+TODO:
 - run on whole data, use proper sampling
 - compare: navaden (probi dosec njihove Dice), potem pa enak trening za navaden + dist (fused at various points), 
 	pa se za zgolj one pathway + dist. Ker mogoce je tut to plus, da subsampled sploh ne rabis, ce mas dist map. 
-
-- loci ledvice
-- poglej parametre treninga ki so omenjeni v orig. paperju - in tud kako dobre Dice dobijo per organ?
+- poglej parametre treninga ki so omenjeni v orig. paperju(DONE) - in tud kako dobre Dice dobijo per organ?
 

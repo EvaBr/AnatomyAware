@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 .vscode/*
 .vscode
 __pycache__/*
@@ -6,6 +7,9 @@ __pycache__
 *.json
 
 Data.zip
+=======
+.vscode/
+>>>>>>> 73f510b92bcbc5016e9c9962b046be55201182fc
 stariNeti.py
 Data/
 Data
@@ -13,3 +17,10 @@ Data_old/
 Data_old
 Results
 Results/
+Data*
+*.zip
+AnatomyNets
+AnatomyNets/
+__pycache__
+__pycache__/
+*.pyc

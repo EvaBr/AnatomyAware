@@ -11,7 +11,6 @@ import natsort
 import numpy as np
 import nibabel as nib
 import pickle
-#import scipy.misc
 import imageio
 import re
 import matplotlib.pyplot as plt
@@ -21,11 +20,15 @@ import torch.nn as nn
 import torch.nn.functional as F
 from tqdm import tqdm
 from functools import partial
+from typing import List
+from torch import Tensor, einsum
+import pandas as pd
 
 
-tqdm_ = partial(tqdm, ncols=100,
+tqdm_ = partial(tqdm, ncols=150,
                 leave=False,
                 bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [' '{rate_fmt}{postfix}]')
+
 
 #################################### READING DATA #############################
 def get_POEM_files():
@@ -147,7 +150,16 @@ def glue_patches(nr, path, patchsize, overlap, nb_classes=7): #glues, also perfo
 
 
 
-##################################### LOSSES & METRICS ########################
+##################################### LOSSES & METRICS & WEIGHT INIT ########################
+#initializing weights
+
+def weights_init(m):
+    if type(m) == nn.Conv3d or type(m) == nn.ConvTranspose3d:
+        nn.init.xavier_normal_(m.weight.data)
+    elif type(m) == nn.BatchNorm3d:
+        m.weight.data.normal_(1.0, 0.02)
+        m.bias.data.fill_(0)
+
 #weighted categ. crossentropy
     
 
@@ -155,35 +167,40 @@ def glue_patches(nr, path, patchsize, overlap, nb_classes=7): #glues, also perfo
 def dice_coeff(pred, target, nb_classes, weights):
     smooth = 0.0001
     #print(target.shape) #(12, 9,9,9)
-    target = torch.clamp(target, min=0) #for now the index -1 that we are supposed to ignore is treated as bckg. 
+    #we might have index -1 present in target. That signalizes the index to ignore...
+    mask = torch.clamp(target+1., min=0, max=1) #with this we get [-1]->0, [0-n_class]->1
+    target = torch.clamp(target, min=0) #need to remove -1 index, to be able to use on_hot:
     target = F.one_hot(target.long(), num_classes=nb_classes).permute(0, 4, 1, 2, 3).contiguous()
     #print(target.shape) #(12, 8, 9,9,9)
-    #we did +1 in case there was a -1 index to ignore when computing dice. Now fix target to ignore this artifical 0 class:
-    #target = target[:, 1:, ...] <- samo to ni dosti... rabu bi tut v 'pred' ignorirat ta index :( 
     
    # weights = torch.from_numpy(weights)
 
     weights = weights.float().view(1, nb_classes, 1, 1, 1) #add dummy dimensions to broadcast when multiplying
+    mask = mask.unsqueeze(1).float()
     dims = tuple(range(1, target.ndimension())) #leave out batch-dim
-    intersection = torch.sum(pred * target * weights, dims) #weighted sum over all classes
-    cardinality = torch.sum((pred + target) * weights, dims) #weighted sum over all classes
+    intersection = torch.sum(pred * target * mask * weights, dims) #weighted sum over all classes
+    cardinality = torch.sum((pred + target) * mask * weights, dims) #weighted sum over all classes
     #print(dims)
     return (2. * intersection) / (cardinality + smooth)
 
 def dice_coeff_per_class(pred, target, nb_classes):
     smooth = 0.0001
     # print(target.shape) #(12, 9,9,9)
-    target = torch.clamp(target, min=0)
+    #we might have index -1 present in target. That signalizes the index to ignore...
+    mask = torch.clamp(target+1., min=0, max=1) #with this we get [-1]->0, [0-n_class]->1
+    mask = mask.unsqueeze(1).float() #unsqueeze at the channel dim, for broadcasting in multiplication
+    target = torch.clamp(target, min=0) #need to remove -1 index, to be able to use on_hot:
+
     target = F.one_hot(target.long(), num_classes=nb_classes).permute(0, 4, 1, 2, 3).contiguous()
     dims = tuple(range(2, target.ndimension())) #leave out batch-dim and class-dim
-    intersection = torch.sum(pred * target, dims)
-    cardinality = torch.sum(pred + target, dims)
+    intersection = torch.sum(pred * target * mask, dims)
+    cardinality = torch.sum((pred + target) * mask, dims)
     #print(dims)
     return (2. * intersection) / (cardinality + smooth)
 
 
 class SoftDiceLoss(nn.Module):
-    def __init__(self, nb_classes, weight, size_average=True):
+    def __init__(self, nb_classes, weight):
         super(SoftDiceLoss, self).__init__()
         self.softmax = nn.Softmax(dim=1)
         self.weights = weight
@@ -200,9 +217,48 @@ class SoftDiceLoss(nn.Module):
 
 
 #more?
+class DiceLoss():
+    def __init__(self, nb_classes=7, weight=np.array([1,1,1,1,1,1,1])):
+        # Self.idc is used to filter out some classes of the target mask. Use fancy indexing
+        self.idc: List[int] = [i for i in np.arange(nb_classes) for j in range(weight[i])]
+        self.nb_classes = nb_classes
+
+    def __call__(self, probs: Tensor, target: Tensor) -> Tensor:
+        target = torch.clamp(target, min=0) #need to remove -1 index, to be able to use on_hot:
+        target = F.one_hot(target.long(), num_classes=self.nb_classes).permute(0, 4, 1, 2, 3).contiguous()
+        probs = nn.Softmax(dim=1)(probs)
+
+        pc = probs[:, self.idc, ...].type(torch.float32)
+        tc = target[:, self.idc, ...].type(torch.float32)
+
+        intersection: Tensor = einsum("bcwhl,bcwhl->bc", pc, tc)
+        union: Tensor = (einsum("bcwhl->bc", pc) + einsum("bcwhl->bc", tc))
+
+        divided: Tensor = 1 - (2 * intersection + 1e-10) / (union + 1e-10)
+
+        loss = divided.mean()
+
+        return loss
 
 
+class CrossEntropy():
+    def __init__(self, nb_classes=7, weight=np.array([1,1,1,1,1,1,1])):
+        # Self.idc is used to filter out some classes of the target mask. Use fancy indexing
+        self.idc: List[int] = [i for i in np.arange(nb_classes) for j in range(weight[i])]
+        self.nb_classes = nb_classes
 
+    def __call__(self, probs: Tensor, target: Tensor) -> Tensor:
+        target = torch.clamp(target, min=0) #need to remove -1 index, to be able to use on_hot:
+        target = F.one_hot(target.long(), num_classes=self.nb_classes).permute(0, 4, 1, 2, 3).contiguous()
+        probs = nn.Softmax(dim=1)(probs)
+        
+        log_p: Tensor = (probs[:, self.idc, ...] + 1e-10).log()
+        mask: Tensor = target[:, self.idc, ...].type(torch.float32)
+
+        loss = - einsum("bcwhl,bcwhl->", mask, log_p)
+        loss /= mask.sum() + 1e-10
+
+        return loss
 
 
 
@@ -213,7 +269,7 @@ def compareimages(GT, out, fati):
     offset=60
     s=GT.shape
     o=out.shape
-    if any(s!=o):
+    if s!=o:
         #we need to padd the output to appropriate size
         a,b,c = [(i-j)//2 for i,j in zip(s,o)]
         out = np.pad(out, pad_width=((a,a), (b,b), (c,c)), mode='constant', constant_values=0)
@@ -250,7 +306,7 @@ def VisualCompare(gt, out, ref, slice=44):
     visualizes them on top of reference. """
     s=GT.shape
     o=out.shape
-    if any(s!=o):
+    if s!=o:
         #we need to padd the output to appropriate size
         a,b,c = [(i-j)//2 for i,j in zip(s,o)]
         out = np.pad(out, pad_width=((a,a), (b,b), (c,c)), mode='constant', constant_values=0)

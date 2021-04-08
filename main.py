@@ -19,6 +19,7 @@ import pandas as pd
 import datetime as dt
 from tqdm import tqdm
 np.set_printoptions(precision=3, suppress=True)
+#import hiddenlayer as hl
 
 ######################################################################################################
 #               SET PARAMETERS
@@ -29,12 +30,24 @@ epochs = 10
 sampling = [0,4,2,2,4,3,2]
 outpath = 'Results/' #'/home/eva/Desktop/research/PROJEKT2-DeepLearning/AnatomyAwareDL/Results/'
 
-use_channels = [0,1] #which channels to use in orig pathway
-use_subsamp = True #do we use subsampled pathway?
-subsamp_channels = [0,1] #which channels to use in subsampleled pathway
-add_chan_size = None #do we have yet another pathway? If yes, how big is the segmentsize? Else None.
-add_chans = None #which channels to use in this additional pathway, if used?
+orig_channels = [0,1] #which channels to use in orig pathway
 
+use_subsamp = True #do we use subsampled pathway?
+subsamp_channels = [0,1] # None #[0,1] #which channels to use in subsampled pathway.
+assert use_subsamp!=(subsamp_channels is None)
+
+add_chan_size = None #11 #do we have yet another pathway? If yes, how big is the segmentsize? Else NONE!!!
+add_channels = [2,3] #which channels to use in this additional pathway, if used.
+add_chan_FM_sizes = [30] #List of feature map sizes in the added pathway, if used. 
+add_join_at = 5 #At which layer in the pathway to fuse the added pathway, if in use. 
+add_to_orig = True #True if fusing into the original pathway, False if fusing to subsampled.
+
+#some checks:
+assert ((add_chan_size is None) or ((1 + 2*len(add_chan_FM_sizes))<=add_chan_size)), "Segment size in 3rd pathway too small for the given FM list!"
+assert 0 <= add_join_at < 10
+nr_orig = len(orig_channels)
+nr_subs = len(subsamp_channels) if use_subsamp else None
+nr_add = None if add_chan_size is None else len(add_channels)
 #
 continue_training = False #set to true if you want to load a net and train it further from there on. If yes, give string what_to_load
 what_to_load = "2020-04-14 22:00:37.557746" #string of the time as the unique id of the net you want to load
@@ -54,28 +67,39 @@ labele_val = glob.glob(dataPath + 'VALdata/lab*'); labele_val.sort()
 #####################################################################################################
 #               NETWORK AND TRAINING OPTIONS
 #####################################################################################################
-dataset = POEMDatasetMultiInput(subjekti, labele, sampling, 25, channels=use_channels, subsample=use_subsamp,
-                 channels_sub=subsamp_channels, segment_size2=add_chan_size, channels2=add_chans)
-dataset_val = POEMDatasetMultiInput(subjekti_val, labele_val, sampling=[1,1,1,1,1,1,1], segment_size=25, channels=use_channels, subsample=use_subsamp,
-                 channels_sub=subsamp_channels, segment_size2=add_chan_size, channels2=add_chans)
+dataset = POEMDatasetMultiInput(subjekti, labele, sampling, segment_size=25, channels=orig_channels, subsample=use_subsamp,
+                 channels_sub=subsamp_channels, segment_size2=add_chan_size, channels2=add_channels, num_classes=num_classes)
+dataset_val = POEMDatasetMultiInput(subjekti_val, labele_val, sampling=[1,1,1,1,1,1,1], segment_size=25, channels=orig_channels, subsample=use_subsamp,
+                 channels_sub=subsamp_channels, segment_size2=add_chan_size, channels2=add_channels, num_classes=num_classes)
                  #POEMDatasetTEST(subjekti_val, labele_val, channels=use_channels, subsampled=use_subsamp, 
                 #channels_sub=subsamp_channels, input2=add_chan_size, channels2=add_chans)
 train_loader = data.DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=multi_input_collate, num_workers=BATCH_SIZE+5, pin_memory=True)
 val_loader = data.DataLoader(dataset_val, batch_size=BATCH_SIZE, collate_fn=multi_input_collate, num_workers=BATCH_SIZE+5, pin_memory=True)
 
-# create your optimizer, network and set parameters
-#net = OnePathway(in_channels=4, num_classes=num_classes, dropoutrateCon=0.2, dropoutrateFC=0.5)
-net = DualPathway(in_channels_orig=len(use_channels), in_channels_subs=len(subsamp_channels), num_classes=num_classes, 
-                    dropoutrateCon=0.2, dropoutrateFC=0.5, nonlin=nn.PReLU())
-#net= DualPathwayNico(in_channels_orig=2, in_channels_subs=2, num_classes=num_classes, dropoutrateCon=0.2, dropoutrateFC=0.5, nonlin=nn.PReLU())
-net = net.float()
 
-optimizer = optim.Adam(net.parameters(), lr=0.001)
+# create your optimizer, network and set parameters
+#net = OnePathway(in_channels=nr_orig, num_classes=num_classes, dropoutrateCon=0.2, dropoutrateFC=0.5)
+net = DualPathway(in_channels_orig=nr_orig, in_channels_subs=nr_subs, num_classes=num_classes, 
+                    dropoutrateCon=0.2, dropoutrateFC=0.5, nonlin=nn.PReLU())
+#net = MultiPathway(in_channels_orig=nr_orig, in_channels_subs=nr_subs, in_channels_add=nr_add, 
+#                    join_at=add_join_at, join_to_orig=add_to_orig, add_FM_sizes=add_chan_FM_sizes, num_classes=7, dropoutrateCon=0.2, dropoutrateFC=0.5, nonlin=nn.PReLU())
+
+net = net.float()
+net.apply(weights_init)
+
+optimizer = optim.Adam(net.parameters(), lr=0.001, betas=(0.9, 0.99), amsgrad=False)
 
 #napaka = nn.CrossEntropyLoss(weight=None, ignore_index=0, reduction='mean') #weight za weightedxentropy, ignore_index ce ces ker klas ignorat.
 #napaka = SoftDiceLoss(nb_classes=num_classes, weight=np.array([1., 1., 1., 1., 2., 1., 1.]))
+
+#napaka1 = nn.CrossEntropyLoss(weight=None, ignore_index=-1, reduction='mean')
+#napaka2 = SoftDiceLoss(nb_classes=num_classes, weight=np.array([0, 1., 1., 1., 1., 1., 1.]))
+
+#napaka1 = DiceLoss(nb_classes=num_classes, weight=np.array([0, 2, 1, 2, 2, 1, 1]))
+#napaka2 = CrossEntropy(nb_classes=num_classes, weight=np.array([1, 1, 1, 2, 1, 1, 1]))
 #######################################################################################################
 
+np.set_printoptions(precision=3, suppress=True) #for prettier printing
 
 prev_epochs = 0
 sampling_history = {}
@@ -91,13 +115,16 @@ if continue_training:
 
 
 
-log_interval = 1 #na kolko batchev reportas.
+#log_interval = 100 #na kolko batchev reportas.
 val_interval = 1 #na kolko epoch delas validation.
 # train on cuda if available
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 print(f"Running on {device}...")
 
 napaka = SoftDiceLoss(nb_classes=num_classes, weight=torch.tensor([0., 2., 2., 3., 1., 2., 2.], device=device))
+napaka1 = DiceLoss(nb_classes=num_classes, weight=torch.tensor([0., 2., 1., 2., 2., 1., 1.], device=device))
+napaka2 = CrossEntropy(nb_classes=num_classes, weight=torch.tensor([1., 1., 1., 2., 1., 1., 1.], device=device))
+
 
 # training loop:
 training_losses = []
@@ -108,6 +135,7 @@ val_epoche = []
 
 vsehslik = len(train_loader.dataset)*subbatch
 net.to(device)
+dl, cen = 0.8, 0.8
 for epoch in range(epochs):
     print('Train Epoch: {}'.format(epoch))
     net.train()
@@ -115,17 +143,21 @@ for epoch in range(epochs):
     epoch_loss = 0.0
     epoch_dice = 0.0
 
-    tqdm_iter = tqdm_(train_loader, total=len(train_loader), desc=">>Training: ", leave=False)
+
+    tqdm_iter = tqdm(train_loader, total=len(train_loader), desc=">>Training: ", leave=False)
   #  for batch_idx, (notr, target) in enumerate(train_loader): #tqdm_iter:
     for (notr, target) in tqdm_iter:
         notr, target = [torch.as_tensor(notri, device=device).float() for notri in notr], torch.as_tensor(target, device=device)
         #notr = notr.to(device)
         #target = target.to(device)
        # print(len(notr))
+        #print(target.shape)
         optimizer.zero_grad()   # zero the gradient buffers
         ven = net(*notr)
        # print((ven.shape, target.shape))
-        loss = napaka(ven, target.long())
+
+    #    loss = napaka(ven, target.long())
+        loss = dl*napaka1(ven, target.long()) + cen*napaka2(ven, target.long())
         loss.backward()
         optimizer.step()
 
@@ -147,31 +179,38 @@ for epoch in range(epochs):
     training_Dice.append(epoch_dice.detach().cpu().numpy())
 
 
-    if (epoch+1)%val_interval==0: #TODO add validation
+    if (epoch+1)%val_interval==0: 
         val_epoche.append(epoch)
         val_loss_rolling = 0.0
         val_Dice_rolling = 0.0
         val_batches = len(val_loader)
+        tq_iter_val = tqdm(val_loader, total=val_batches, desc=">>Validation: ")
         with torch.no_grad():
-            for in_val, target_val in val_loader:
-                x_val, y_val = [torch.as_tensor(notr, device=device).float() for notr in in_val], torch.as_tensor(target_val, device=device)
-        
+            for x_val, y_val in tq_iter_val: #val_loader:
+                x_val = [torch.as_tensor(xv,device=device).float() for xv in x_val]
+                y_val = torch.as_tensor(y_val, device=device)
                 net.eval()
                 y_hat = net(*x_val)
 
-                val_loss_rolling += napaka(y_hat, y_val.long()).item()
+                val_loss_rolling += napaka1(y_hat, y_val.long()).item() + napaka2(y_hat, y_val.long()).item()
                 val_Dice_rolling += dice_coeff_per_class(nn.Softmax(dim=1)(y_hat), y_val, nb_classes=num_classes).mean(0).squeeze()
 
             val_losses.append(val_loss_rolling/val_batches)
+
             val_Dice.append(val_Dice_rolling.detach().cpu().numpy()/val_batches)
         print(f'>> VALIDATION: \n Total val loss: {val_losses[-1]:.4f},  val Dices: {val_Dice[-1]}')
+    
+    dl, cen = min(dl+0.01, 1), max(cen-0.01, 0.01) #update weighted loss
 
+
+
+#unique identifier:
+cas = dt.datetime.now()
    
 #add also infos on sampling of the given run to history:
 sampling_history[prev_epochs+epochs] = sampling
 
-print("Training finished. Saving metrics...")
-cas = dt.datetime.now()
+print("Training Done. Saving metrics...")
 dejta_tr = np.column_stack([np.array(training_losses), np.array(training_Dice)])
 df = pd.DataFrame(data=dejta_tr,    # values
     columns=np.array(['Loss', 'Dice Bckg', 'Dice Bladder', 'Dice R Kidney', 'Dice Liver', 'Dice Pancreas', 'Dice Spleen', 'Dice L Kidney']))
@@ -182,6 +221,7 @@ df = pd.DataFrame(data=dejta_vl,    # values
 df.to_csv(outpath + f'DiceAndLoss_{cas}_val.csv')
 
 
+#TODO: save loss type and weights somewhere too. 
 print("Saving trained network...")
 checkpoint = {
     'past_checkpoints': past_checkpoints + [str(cas)],
@@ -193,6 +233,6 @@ checkpoint = {
     'name': net.name
 }
 torch.save(checkpoint, outpath + "Networks/" + net.name + "_" + str(cas)+".pt")
-
+print(f"Done. Saved under id: {cas} ({net.name})")
 
 

@@ -105,6 +105,7 @@ class POEMDatasetMultiInput(data.Dataset):
         self.in2 = False if segment_size2==None else True
         self.in2seg = segment_size2 #here we assume this one is not the biggest of all used segments.
         self.in2ch = channels2
+        self.num_classes = num_classes
 
     def __len__(self):
         'total number of samples'
@@ -117,6 +118,7 @@ class POEMDatasetMultiInput(data.Dataset):
         subj = subjdata['channels']
         dic = subjdata['organ_sizes'].item()
         label = np.load(self.labels[item])
+        assert label.shape == subj[0].shape, "Shape mismatch."
         #get patches according to sampling strategy.
         #first let's correct sampling for the given subj:
         localSampling = self.sampling
@@ -140,9 +142,9 @@ class POEMDatasetMultiInput(data.Dataset):
   #          alla = np.column_stack(np.where(label_for_sampling==org))
             alla = np.column_stack(np.where(label==org))
             alla = alla[np.random.choice(alla.shape[0], localSampling[org], replace=False),...]
-            centres.append(alla)
+            centres.extend(alla)
 
- #       centres = [ctr+bigsegment for ctr in centres if ctr]
+ #       centres = [ctr+bigsegment for ctr in centres if ctr.size!=0]
         centres = np.concatenate(centres, axis=0)
         #now sample:
         patches =  []
@@ -191,9 +193,9 @@ class POEMDatasetMultiInput(data.Dataset):
             for center in newcentres:
                 i, j, k = center
                 padded = np.pad(subj, ((0,), (self.in2seg,), (self.in2seg,), (self.in2seg,)), 'symmetric')
-                patches2.append(torch.from_numpy(padded[self.in2ch, i:i + self.in2seg*2 + 1:self.f,
-                                                                    j:j + self.in2seg*2 + 1:self.f,
-                                                                    k:k + self.in2seg*2 + 1:self.f]))
+                patches2.append(torch.from_numpy(padded[self.in2ch, i:i + self.in2seg*2 + 1,
+                                                                    j:j + self.in2seg*2 + 1,
+                                                                    k:k + self.in2seg*2 + 1]))
             out.append(torch.stack(patches2))
 
         out.append(torch.stack(truths))

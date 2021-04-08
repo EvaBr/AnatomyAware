@@ -12,11 +12,12 @@ import re
 from networks import *
 from helpers import *
 from generators import *
+import pandas as pd 
 
 ################ WHICH NET+DATA TO TEST
 dataPath = '/home/eva/Desktop/research/PROJEKT2-DeepLearning/AnatomyAwareDL/Data/TESTdata/'
 networkPath = '/home/eva/Desktop/research/PROJEKT2-DeepLearning/AnatomyAwareDL/Results/Networks/'
-what_to_load = "netname.pt" #string of the time as the unique id of the net you want to load
+what_to_load = "DualPathway_2020-07-27 12:03:33.119473.pt" #"netname.pt" #string of the time as the unique id of the net you want to load
 num_classes = 7
 
 patchsize = 52
@@ -37,8 +38,8 @@ else:
     test_list = glob.glob(outpath+"subj_*[0-9].npy")
 
 use_channels = [0,1]
-subsamp_channels = [2,3]
-additional_channels = None
+subsamp_channels = [0,1]
+additional_channels = [2,3]
 test_dataset = POEMDatasetTEST(test_list, channels=use_channels, subsampled=True, channels_sub=subsamp_channels, input2=None, channels2=None)
 test_loader = data.DataLoader(test_dataset, batch_size=4, shuffle=False, collate_fn=test_collate)
 
@@ -51,7 +52,7 @@ net = net.float()
 net.load_state_dict(checkpoint['state_dict'])
 net.to(device)
 net.eval()
-napaka = SoftDiceLoss(nb_classes=num_classes, weight=np.array([1., 1., 1., 1., 2., 1., 1.])) #which loss, together with per-organ dice 
+napaka = SoftDiceLoss(nb_classes=num_classes, weight=np.array([0., 1., 1., 1., 2., 1., 1.])) #which loss, together with per-organ dice 
 # you want to evaluate on the test set. Advised to be the same as when training.
 
 i=0
@@ -102,14 +103,18 @@ df = pd.DataFrame(data=dejta,    # values
 df.to_csv(outpath+f'DiceAndLoss_Test.csv')
 
 
-
+#%%
 #to visualize an example subject, do:
-nr = 22 #nr of subject to load
+dataPath = '/home/eva/Desktop/research/PROJEKT2-DeepLearning/AnatomyAwareDL/Data/TESTdata/'
+outpath = dataPath+'PATCHES/'
+nr = 4 #nr of subject to load
 GT = np.load(dataPath+f'label_{nr}.npy')
 out = np.load(f'{outpath}results/out{nr}.npy')
 ref = np.load(dataPath+f'subj_{nr}.npz')['channels'][1, ...] #take just the first channel as the fat reference scan
-compareimages(GT, out, ref)
-#or 
-VisualCompare(GT, out, ref, slice=44)
+#compareimages(GT, out, ref)
+#or
+for slic in range(40,60): 
+    VisualCompare(GT, out, ref, slice=slic)
+
 
 
