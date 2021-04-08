@@ -142,7 +142,7 @@ class POEMDatasetMultiInput(data.Dataset):
   #          alla = np.column_stack(np.where(label_for_sampling==org))
             alla = np.column_stack(np.where(label==org))
             alla = alla[np.random.choice(alla.shape[0], localSampling[org], replace=False),...]
-            centres.extend(alla)
+            centres.append(alla)
 
  #       centres = [ctr+bigsegment for ctr in centres if ctr.size!=0]
         centres = np.concatenate(centres, axis=0)

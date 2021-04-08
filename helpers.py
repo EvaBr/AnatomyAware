@@ -218,9 +218,9 @@ class SoftDiceLoss(nn.Module):
 
 #more?
 class DiceLoss():
-    def __init__(self, nb_classes=7, weight=np.array([1,1,1,1,1,1,1])):
+    def __init__(self, nb_classes, weight):
         # Self.idc is used to filter out some classes of the target mask. Use fancy indexing
-        self.idc: List[int] = [i for i in np.arange(nb_classes) for j in range(weight[i])]
+        self.idc: List[int] = [i for i in np.arange(nb_classes) for j in range(weight[i].item())]
         self.nb_classes = nb_classes
 
     def __call__(self, probs: Tensor, target: Tensor) -> Tensor:
@@ -242,9 +242,9 @@ class DiceLoss():
 
 
 class CrossEntropy():
-    def __init__(self, nb_classes=7, weight=np.array([1,1,1,1,1,1,1])):
+    def __init__(self, nb_classes, weight):
         # Self.idc is used to filter out some classes of the target mask. Use fancy indexing
-        self.idc: List[int] = [i for i in np.arange(nb_classes) for j in range(weight[i])]
+        self.idc: List[int] = [i for i in np.arange(nb_classes) for j in range(weight[i].item())]
         self.nb_classes = nb_classes
 
     def __call__(self, probs: Tensor, target: Tensor) -> Tensor:

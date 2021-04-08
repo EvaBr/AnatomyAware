@@ -90,10 +90,10 @@ net.apply(weights_init)
 optimizer = optim.Adam(net.parameters(), lr=0.001, betas=(0.9, 0.99), amsgrad=False)
 
 #napaka = nn.CrossEntropyLoss(weight=None, ignore_index=0, reduction='mean') #weight za weightedxentropy, ignore_index ce ces ker klas ignorat.
-#napaka = SoftDiceLoss(nb_classes=num_classes, weight=np.array([1., 1., 1., 1., 2., 1., 1.]))
+#napaka = SoftDiceLoss(nb_classes=num_classes, weight=np.array([1, 1, 1, 1, 2, 1, 1]))
 
 #napaka1 = nn.CrossEntropyLoss(weight=None, ignore_index=-1, reduction='mean')
-#napaka2 = SoftDiceLoss(nb_classes=num_classes, weight=np.array([0, 1., 1., 1., 1., 1., 1.]))
+#napaka2 = SoftDiceLoss(nb_classes=num_classes, weight=np.array([0, 1, 1, 1, 1, 1, 1]))
 
 #napaka1 = DiceLoss(nb_classes=num_classes, weight=np.array([0, 2, 1, 2, 2, 1, 1]))
 #napaka2 = CrossEntropy(nb_classes=num_classes, weight=np.array([1, 1, 1, 2, 1, 1, 1]))
@@ -121,9 +121,9 @@ val_interval = 1 #na kolko epoch delas validation.
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 print(f"Running on {device}...")
 
-napaka = SoftDiceLoss(nb_classes=num_classes, weight=torch.tensor([0., 2., 2., 3., 1., 2., 2.], device=device))
-napaka1 = DiceLoss(nb_classes=num_classes, weight=torch.tensor([0., 2., 1., 2., 2., 1., 1.], device=device))
-napaka2 = CrossEntropy(nb_classes=num_classes, weight=torch.tensor([1., 1., 1., 2., 1., 1., 1.], device=device))
+napaka = SoftDiceLoss(nb_classes=num_classes, weight=torch.tensor([0, 2, 2, 3, 1, 2, 2], device=device))
+napaka1 = DiceLoss(nb_classes=num_classes, weight=torch.tensor([0, 2, 1, 2, 2, 1, 1], device=device))
+napaka2 = CrossEntropy(nb_classes=num_classes, weight=torch.tensor([1, 1, 1, 2, 1, 1, 1], device=device))
 
 
 # training loop:
@@ -137,7 +137,7 @@ vsehslik = len(train_loader.dataset)*subbatch
 net.to(device)
 dl, cen = 0.8, 0.8
 for epoch in range(epochs):
-    print('Train Epoch: {}'.format(epoch))
+    print('\nEpoch: {}'.format(epoch))
     net.train()
     running_loss = 0.0
     epoch_loss = 0.0
@@ -173,8 +173,9 @@ for epoch in range(epochs):
 
 
     epoch_loss = epoch_loss/vsehslik
-    epoch_dice = epoch_dice.squeeze()/vsehslik
-    print('>> TRAINING: Epoch {} finished. \nAveraged loss:  {:.4f}, avg Dices: {}'.format(epoch, epoch_loss, epoch_dice.detach().cpu().numpy()))
+    epoch_dice = epoch_dice/vsehslik
+    
+    print(f">> TRAINING: \n Averaged loss:  {epoch_loss:.4f}, avg Dices: {epoch_dice.detach().cpu().numpy()}")
     training_losses.append(epoch_loss)
     training_Dice.append(epoch_dice.detach().cpu().numpy())
 
@@ -184,7 +185,7 @@ for epoch in range(epochs):
         val_loss_rolling = 0.0
         val_Dice_rolling = 0.0
         val_batches = len(val_loader)
-        tq_iter_val = tqdm(val_loader, total=val_batches, desc=">>Validation: ")
+        tq_iter_val = tqdm(val_loader, total=val_batches, desc=">>Validation: ", leave=False)
         with torch.no_grad():
             for x_val, y_val in tq_iter_val: #val_loader:
                 x_val = [torch.as_tensor(xv,device=device).float() for xv in x_val]
